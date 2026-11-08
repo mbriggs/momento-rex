@@ -84,7 +84,8 @@ for cfg in Restore Handoff; do
 done
 
 # known findings: each must still fail on its property, until the code is fixed
-for f in F1-typed-mid-step:ResumeLandsAtPrompt F2-slow-shell:SavedChatSurvives; do
+FINDINGS=(F1-typed-mid-step:ResumeLandsAtPrompt)
+for f in "${FINDINGS[@]}"; do
   cfg="${f%%:*}" want="${f#*:}"
   tlc "$HERE" Restore "$cfg" "$OUT/$cfg.out"
   inv="$(violated "$OUT/$cfg.out")"

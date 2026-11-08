@@ -36,6 +36,8 @@ cat > "$T/zdot/.zshrc" <<EOF
 PROMPT='%~ %% '
 path=("$T/bin" \$path)
 alias claude='FAKE_ALIAS=1 claude'
+# A slow rc that waits inside zsh itself, so zsh is in front the whole time.
+[[ -e "$T/slow-rc" ]] && { zmodload zsh/zselect; zselect -t 1900 }
 EOF
 
 # The test's init.lua is the one `momento-rex install` writes, on top of user content.
@@ -210,6 +212,19 @@ sleep 20
 check "a resumed chat suspended before momento-rex saw it keeps its record" 'chat_is $BF $ID_F resuming || chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1; tail -5 "$STATE/momento-rex.log")"
 type_in "$SF" "$BF" fg
 check "back in front, it is saved as live" 'wait_for 10 chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1)"
+
+echo "slow shell startup"
+# The restored zsh spends 19 s in its rc, longer than RESUME_GRACE +
+# EXIT_CONFIRM. Before the fix, momento-rex typed at once, the line sat unread, and
+# the record was forgotten as "resume did not start" before zsh ran it.
+touch "$T/slow-rc"
+stop_server
+: > "$T/launches"
+start_server
+check "claude resumes once the slow shell is ready" 'wait_for 35 launched "claude resumed $ID_F"' "$(cat "$T/launches"; tail -5 "$STATE/momento-rex.log")"
+rm -f "$T/slow-rc"
+check "its record was kept the whole time" '! grep -F "forget $BF" "$STATE/momento-rex.log" | grep -q "resume did not start"' "$(grep -F "$BF" "$STATE/momento-rex.log")"
+check "it is saved as live" 'wait_for 10 chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1)"
 
 echo "cleanup"
 R kill "$SA" >/dev/null 2>&1

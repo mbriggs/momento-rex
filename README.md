@@ -68,9 +68,12 @@ Nothing in Claude's or Codex's config, no shell rc changes, no launchd.
 - momento-rex checks that the pane's shell is at its prompt just before it types,
   but Rex can't make that check and the typing one step. A command you start
   in the moment between them gets the resume line instead.
-- If the restored shell takes more than about 17 seconds to run the typed
-  resume line, momento-rex forgets the chat until it sees the agent running again. A
-  Rex restart in that gap doesn't bring the chat back.
+- momento-rex waits to type until the restored shell's line editor is
+  reading (Rex reports the tty as non-canonical), so a slow rc file only
+  delays the resume. A shell with no line editor (`sh`, `bash --noediting`)
+  never gets one, and `momento-rex status` shows `resume.waiting`. If the
+  resume command itself takes more than about 17 seconds to start the agent,
+  momento-rex forgets the chat until it sees the agent running.
 - A pane with a different `CLAUDE_CONFIG_DIR` from the Rex server isn't seen.
 - Each Rex host runs its own watcher; install momento-rex on each host.
 - Typed commands use POSIX `cd -- '...' &&` syntax: zsh, bash, and fish 3+.

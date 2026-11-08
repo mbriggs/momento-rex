@@ -33,6 +33,9 @@ local function to_obs(f, alive, es)
   return {
     ok = true, session_id = "S", block_id = "B", inc = "inc" .. f[3], kind = kind,
     at_prompt = f[2] == "TRUE", shell_cwd = CWD, fg_cwd = CWD,
+    -- watch.lua sets line_ready only at the prompt, and decide reads it only
+    -- there, so passing the model's value for every kind is equivalent.
+    line_ready = f[6] == "TRUE",
     agent = kind == "claude" and { pid = pid, start = "start" .. pid } or nil,
     chat = chat ~= 0 and { id = UUID[chat], cwd = CWD } or nil,
     agent_alive = alive, exit_seen = es,
