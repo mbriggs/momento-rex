@@ -125,6 +125,21 @@ type_in "$SB" "$BB" hello
 check "codex: record saved after the first message" 'wait_for 10 has_chat $BB'
 ID_B="$(recf "$BB" chat_id)"
 
+# Claude cuts project folder names over 200 characters and adds a hash, so
+# bunk can't work out the folder from the cwd and has to search by chat id.
+LONG="$T/work/$(printf 'a-folder-name-long-enough-to-be-cut-%02d/' 1 2 3 4 5 6)end"
+mkdir -p "$LONG"
+read -r SG BG < <(pane g "$LONG")
+sleep 1
+type_in "$SG" "$BG" claude
+sleep 1
+type_in "$SG" "$BG" hello
+check "claude in a long folder: record saved" 'wait_for 10 has_chat $BG' "$(ls "$T/claude/projects"; tail -5 "$STATE/bunk.log")"
+check "claude in a long folder: its transcript is under a cut, hashed name" \
+  '[ -n "$(ls "$T/claude/projects" | awk "length > 200")" ]' "$(ls "$T/claude/projects")"
+type_in "$SG" "$BG" /exit
+wait_for 10 no_rec "$BG"
+
 type_in "$SC" "$BC" claude
 sleep 1
 type_in "$SC" "$BC" hello
