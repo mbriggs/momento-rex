@@ -74,6 +74,7 @@ chat_changed() { has_chat "$1" && [ "$(recf "$1" chat_id)" != "$2" ]; }
 no_rec() { [ ! -f "$(rec "$1")" ]; }
 status_has() { B status 2>&1 | grep -q "$1"; }
 started() { watchers_are 1 && [ -f "$STATE/status.json" ]; }
+took_over() { [ "$(jq -r .token "$STATE/status.json" 2>/dev/null)" = "$(tr -d '[:space:]' < "$STATE/watcher.token")" ]; }
 up() { R ls >/dev/null 2>&1; }
 server_gone() { ! kill -0 "$SERVER_PID" 2>/dev/null; }
 
@@ -89,6 +90,7 @@ start_server
 check "init.lua starts one watcher" 'wait_for 10 started'
 R config reload >/dev/null 2>&1
 check "after a config reload, one watcher is left" 'sleep 1; wait_for 10 watchers_are 1' "$(pgrep -fl "state_dir=$STATE")"
+check "the new watcher takes over once the old one has exited" 'wait_for 10 took_over' "$(tail -5 "$STATE/bunk.log")"
 
 echo "saving"
 read -r SA BA < <(pane a "$T/work")
@@ -160,6 +162,28 @@ read -r SE BE < <(pane e "$T/work")
 sleep 1
 type_in "$SE" "$BE" "FAKE_CLAUDE_V2=1 claude"
 check "a changed Claude sessions file shows up in status" 'wait_for 20 status_has claude.sessions' "$(B status 2>&1)"
+
+echo "resumed, then Ctrl-Z"
+read -r SF BF < <(pane f "$T/work")
+sleep 1
+type_in "$SF" "$BF" claude
+sleep 1
+type_in "$SF" "$BF" hello
+wait_for 10 has_chat "$BF"
+ID_F="$(recf "$BF" chat_id)"
+touch "$T/claude/slow-session"
+stop_server
+: > "$T/launches"
+start_server
+check "claude resumes in pane f" 'wait_for 15 launched "claude resumed $ID_F"' "$(cat "$T/launches")"
+R send-key -s "$SF" -b "$BF" ctrl+z >/dev/null
+rm -f "$T/claude/slow-session"
+# RESUME_GRACE (15 s) + EXIT_CONFIRM (2 s) + a pass: before the fix, the
+# record was forgotten here because bunk never saw the resumed claude in front.
+sleep 20
+check "a resumed chat suspended before bunk saw it keeps its record" 'chat_is $BF $ID_F resuming || chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1; tail -5 "$STATE/bunk.log")"
+type_in "$SF" "$BF" fg
+check "back in front, it is saved as live" 'wait_for 10 chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1)"
 
 echo "cleanup"
 R kill "$SA" >/dev/null 2>&1

@@ -15,7 +15,8 @@ bin/bunk uninstall   # removes the line and stops the watcher; saved chats stay
 Rex starts the watcher from init.lua and stops it when the server stops:
 
 ```
-init.lua ──► rex do lib/bunk/watch.lua --all      (one per server; newest wins on reload)
+init.lua ──► rex do lib/bunk/watch.lua --all      (one per server; on reload the new one
+                                                    waits for the old one to exit, then takes over)
                every 3s and on each foreground change, for every pane:
                  agent in front  → save {agent, chat id, folder, shell identity}
                  agent exited    → forget the chat (confirmed on a second look)
@@ -64,6 +65,12 @@ Nothing in Claude's or Codex's config, no shell rc changes, no launchd.
 - A chat you switch within the last few seconds before Rex stops may come
   back as the previous chat. A chat you quit in the last two seconds may come
   back; quit it again.
+- bunk checks that the pane's shell is at its prompt just before it types,
+  but Rex can't make that check and the typing one step. A command you start
+  in the moment between them gets the resume line instead.
+- If the restored shell takes more than about 17 seconds to run the typed
+  resume line, bunk forgets the chat until it sees the agent running again. A
+  Rex restart in that gap doesn't bring the chat back.
 - A pane with a different `CLAUDE_CONFIG_DIR` from the Rex server isn't seen.
 - Each Rex host runs its own watcher; install bunk on each host.
 - Typed commands use POSIX `cd -- '...' &&` syntax: zsh, bash, and fish 3+.
@@ -78,3 +85,7 @@ The end-to-end test starts a throwaway Rex server on a socket in a temp
 directory, with fake `claude` and `codex` programs that imitate the files
 above, and restarts that server. It never talks to your Rex. Real agents
 haven't been through a restart yet; try one before relying on it.
+
+`verify/restore/check` model-checks the save-and-resume protocol with TLA+
+(java and luajit). `.claude/skills/verify-restore-model/SKILL.md` says what
+it covers and how to read it.
