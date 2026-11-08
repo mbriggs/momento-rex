@@ -1,6 +1,6 @@
 ---
 name: verify-momento-rex
-description: Drive momento-rex (the Rex watcher that brings Claude Code and Codex chats back after a Rex server restart) end to end in a throwaway Rex server with fake agents, and capture proof. Use to verify a change to bin/momento-rex or lib/momento-rex, reproduce a save/restore bug, or check install, uninstall, and status behavior the way a user sees it.
+description: Drive momento-rex end to end in a throwaway Rex server and capture proof. Use to verify a change to bin/momento-rex or lib/momento-rex, or to reproduce a save, restore, install, or status bug.
 ---
 
 # Verify momento-rex
@@ -8,14 +8,14 @@ description: Drive momento-rex (the Rex watcher that brings Claude Code and Code
 momento-rex has no UI of its own. A user touches it in three places:
 
 1. The `bin/momento-rex` CLI (`install`, `uninstall`, `status`, `start`, `version`).
-2. Their Rex panes. A pane where `claude` or `codex` is running gets a record, and after a Rex server restart the restored shell has `claude --resume ID` or `codex resume ID` typed into it.
+2. Their Rex panes. A pane running `claude` or `codex` gets a record, and after a Rex server restart the restored shell has `claude --resume ID` or `codex resume ID` typed into it.
 3. Files in `$MOMENTO_REX_STATE_DIR` (`panes/*.json`, `status.json`, `momento-rex.log`) and one tagged line in `init.lua`.
 
-Verification therefore means running a real Rex server, real zsh panes, and the real watcher, then restarting that server. The helper `bin/sandbox` in this skill does that on a private socket in `/tmp/momento-rex-verify.XXXX`, with the fake `claude` and `codex` from `test/fake-agent.sh`.
+`bin/sandbox` in this skill runs a real Rex server, real zsh panes, and the real watcher on a private socket in `/tmp/momento-rex-verify.XXXX`, with the fake `claude` and `codex` from `test/fake-agent.sh`, and restarts that server. The fakes are the one acceptable mock here, because momento-rex only reads the agents' files and process list and never calls them.
 
-Never drive the user's own Rex server to verify momento-rex. Restarting it kills every pane they have open. Every `sandbox` command talks to the run's own socket, and `up` aborts if that socket answers as a different server. Don't call `bin/momento-rex` or `rex` directly with `REX_SERVER` set to the sandbox socket. When that socket is gone (the sandbox is stopped, or already torn down), rex quietly falls back to the user's own server. `$S momento-rex` avoids this by giving momento-rex a `rex` shim (`$BV_RUN/rexshim/rex`) that passes `-S`, which never falls back, and `$S rex` passes `-S` too. Runs are isolated by directory, so several can exist side by side.
+When a socket is gone, `rex` quietly falls back to the user's own server, and restarting that kills every pane they have open. So reach the sandbox only through `$S rex` and `$S momento-rex`, which pass `-S` and never fall back. Never set `REX_SERVER` to the sandbox socket and call `rex` or `bin/momento-rex` directly.
 
-All commands below run from the repo root. Requirements: `rex`, `jq`, `zsh`, `uuidgen`, `lsof` on PATH. `luajit` is only needed for `make unit`.
+Run everything from the repo root. It needs `rex`, `jq`, `zsh`, `uuidgen`, and `lsof` on PATH.
 
 ```sh
 S=.claude/skills/verify-momento-rex/bin/sandbox
@@ -24,38 +24,17 @@ S=.claude/skills/verify-momento-rex/bin/sandbox
 ## Launch
 
 ```sh
-eval "$($S up)"        # exports BV_RUN=/tmp/momento-rex-verify.XXXX, prints the evidence dir
+$S up       # prints the run dir and the evidence dir
+$S doctor   # read-only health check; exits 1 if anything is off
 ```
 
-`up` creates the run directory, writes fake `claude`/`codex` wrappers and a `.zshrc` that puts them on PATH (plus `alias claude='FAKE_ALIAS=1 claude'`, so you can see that the user's alias was used), writes an `init.lua` holding two lines of user content, and runs `momento-rex install --no-start` against it. It then starts `rex server run` with that config. The server's `init.lua` launches the watcher with `MOMENTO_REX_PERIOD=1` (one pass per second instead of three) and `MOMENTO_REX_GC_AFTER=6`.
+`up` writes fake `claude`/`codex` wrappers and a `.zshrc` that puts them on PATH, with `alias claude='FAKE_ALIAS=1 claude'` so `launches` shows `alias=1` when the user's alias was used. It writes an `init.lua` with two lines of user content, runs `momento-rex install --no-start` against it, and starts `rex server run` with that config. The watcher runs a pass every second (`MOMENTO_REX_PERIOD=1`) and garbage-collects after 6 seconds (`MOMENTO_REX_GC_AFTER=6`). `up`, `start`, and `restart` return 0 once the server answers and its watcher has written `state/status.json` with the current token.
 
-The run is ready when `up` returns 0. It waits for the server to answer on its socket and for the watcher that server started to write `state/status.json` with the current token. `start` and `restart` wait the same way. Any failure exits non-zero with the reason.
+Every other subcommand uses the checkout's latest run, which `up` records in `tmp/sandbox-run`. Recipes name paths inside the run as `$BV_RUN/...`, so set `BV_RUN=$(cat tmp/sandbox-run)` in each Bash call or script that uses them. To drive two runs from one checkout at once, set `BV_RUN` to each run dir.
 
-Every other subcommand reads the run from `$BV_RUN`. In a new shell, run `export BV_RUN=/tmp/momento-rex-verify.XXXX` again. Shell variables don't carry between separate Bash tool calls, so put the export at the top of each call.
+In a worktree lane, the Bash hook refuses a tool call holding compound commands such as `read ... < <($S pane a)` or `sh -c "$S ..."`. Inside a script they run fine, so write the journey as a script under the lane's `tmp/` (gitignored) and run `bash tmp/NAME.sh`.
 
-A session isolated to a worktree lane refuses `eval`. There, write the journey as a script under the lane's `tmp/` (gitignored) and run it with `bash tmp/NAME.sh`. Inside the script, set the run with `BV_RUN="$($S up | sed -n 's/^export BV_RUN=//p')"; export BV_RUN`.
-
-In a lane, `bin/momento-rex start` and `install` without `--no-start` exit 3 even against the sandbox, because momento-rex can't tell the sandbox from your real Rex. Every journey except `restore-watcher-only` avoids them. Drive that one from the primary checkout.
-
-## Doctor
-
-```sh
-$S doctor; echo rc=$?
-```
-
-Doctor is read-only. It checks that the socket answers as this run's server, that the answering pid is the one `up` started, that exactly one watcher process carries this run's `state_dir=`, and it prints the momento-rex version and `momento-rex status`. It exits 1 if any check fails. A healthy run looks like:
-
-```
-server     up, pid 83391, unix:///private/tmp/momento-rex-verify.JgBA/s.sock
-watcher    1 process for this run
-momento-rex       momento-rex 0.1.0 from /Users/.../momento-rex
---- momento-rex status
-watcher   running, v0.1.0, last pass 0s ago
-init.lua  set up (...)
-chats     none saved
-```
-
-Run doctor first whenever anything looks off. Zero watchers after a restart means init.lua didn't start one. Two means the newest-wins handoff broke.
+Doctor checks that the socket answers as this run's server with the pid `up` started, that exactly one watcher carries this run's `state_dir=`, and prints `momento-rex status`. Run it first whenever anything looks off. Zero watchers after a restart means init.lua didn't start one, and two means the newest-wins handoff broke.
 
 ## Drive
 
@@ -66,15 +45,24 @@ Run doctor first whenever anything looks off. Zero watchers after a restart mean
 | `$S key $SA $BA ctrl+z` | Sends a key press. |
 | `$S fg $SA $BA` | Foreground program name: `claude`, `codex`, or `zsh`. |
 | `$S record $BA` | The pane's saved record (JSON). Exits 1 if there is none. |
-| `$S wait SECS CMD ARGS...` | Retries CMD until it exits 0. Use it instead of fixed sleeps, e.g. `$S wait 10 $S record $BA`. CMD runs with `$BV_RUN` exported, so `$S` works inside `sh -c`. |
-| `$S restart` | Stops the server (Rex saves sessions), starts it again from the same state dir. Rex restores panes as fresh shells with the same block IDs. |
-| `$S launches` | One line per fake-agent start: `claude new ID cwd=... alias=1` or `claude resumed ID ...`. Restarts add a `--- restart HH:MM:SS` line. |
+| `$S wait SECS CMD ARGS...` | Retries CMD until it exits 0, e.g. `$S wait 10 $S record $BA`. CMD runs with `$BV_RUN` exported. |
+| `$S restart` | Stops the server (Rex saves sessions) and starts it again. Rex restores panes as fresh shells with the same block IDs. |
+| `$S launches` | One line per fake-agent start: `claude new ID cwd=... alias=1` or `claude resumed ID ...`. Each restart adds a `--- restart HH:MM:SS` line and never clears earlier ones. |
 | `$S momento-rex ARGS...` | `bin/momento-rex` with this run's config, state dir, and socket. |
 | `$S rex ARGS...` | `rex` against this run's server, e.g. `$S rex capture -s $SA -b $BA --trim`. |
 
-The fake agents read stdin lines. Any line counts as a chat message. `/clear` starts a new chat ID, and `/exit` quits. `FAKE_CLAUDE_V2=1 claude` writes a sessions file in a changed format, which simulates Claude changing its private files. See `test/fake-agent.sh` for exactly which files each fake writes.
+The fake agents read stdin lines. Any line counts as a chat message. `/clear` starts a new chat ID, and `/exit` quits. `FAKE_CLAUDE_V2=1 claude` writes a sessions file in a changed format, which simulates Claude changing its private files. `test/fake-agent.sh` shows exactly which files each fake writes. Start the fakes by typing into a pane, never directly.
 
-The feature map in `features/` has a recipe for each user-facing behavior. Read `features/README.md` before driving.
+Start each journey from a fresh `up` unless it says it continues from another. Use the block ID as the pane's handle, since Rex keeps it across a restart. Keep quoted folder names such as `$BV_RUN/it's dir` exactly as written.
+
+## Journeys
+
+Each file in `features/` is the recipe for one area, with sub-feature IDs, the steps, and the gotchas. Drive every sub-feature your change can affect.
+
+- [Install and uninstall](features/install-uninstall.md): the init.lua line, its backup, idempotence, the watcher starting with Rex, and a clean uninstall.
+- [Saving chats](features/save-chats.md): when a pane's chat gets a record, `/clear`, Ctrl-Z, and exit.
+- [Restore after restart](features/restore-after-restart.md): resuming Claude and Codex in restored panes, exactly once, in the right folder.
+- [Status and problems](features/status.md): `momento-rex status` output, its exit code, and the problems it reports.
 
 ## Evidence
 
@@ -82,14 +70,16 @@ The feature map in `features/` has a recipe for each user-facing behavior. Read 
 $S snap LABEL     # prints the directory it wrote
 ```
 
-`snap` writes `/tmp/momento-rex-verify-evidence/<run id>/LABEL/` with: `screen-<block>.txt` (each pane's screen and scrollback), `records/` (copies of `panes/*.json`), `status.txt` (`momento-rex status` output plus its exit code), `momento-rex.log`, `launches.txt`, `init.lua`, and `sessions.json`. `up` also saves `install.txt` there. Snap before and after each action you are proving, with labels like `before-restart` and `after-restart`.
+`snap` writes `/tmp/momento-rex-verify-evidence/<run id>/LABEL/` with `screen-<block>.txt` (each pane's screen and scrollback), `records/` (copies of `panes/*.json`), `status.txt` (`momento-rex status` output and exit code), `momento-rex.log`, `launches.txt`, `init.lua`, and `sessions.json`. `up` also saves `install.txt` there. Snap before and after each action you prove, with the journey in the label, like `restore-before`.
 
-Proof standards:
+What counts as proof:
 
-- Go through the user's path. Type `claude` into a pane and restart the server. Don't write records by hand, and don't call `lib/momento-rex/*.lua` functions to simulate a pass. The one exception is the safety journey, which plants a record because a hostile record is exactly what it tests.
-- A restore is proven by three things together. The pane's screen shows the typed `claude --resume ID` (or `cd -- '...' && codex resume ID`). `launches` shows `resumed ID` with the expected `cwd=`, and shows it exactly once. And `fg` is the agent.
-- Prove side effects as well as output. That means the record file appearing or disappearing, the `init.lua` diff, and the `momento-rex status` exit code.
-- The agents are fakes. This is the one place a mock is acceptable, because momento-rex only reads the agents' files and process list and never calls them. A pass here does not prove that real Claude or Codex still write those files the same way. See Gotchas in `features/restore-after-restart.md`.
+- **The user's path.** Type `claude` into a pane and restart the server. Don't write records by hand or call `lib/momento-rex/*.lua` functions to simulate a pass. The unsafe-record journey in `status.md` is the one exception.
+- **A restore** needs three things together: the typed `claude --resume ID` (or `cd -- '...' && codex resume ID`) on the pane's screen, exactly one `resumed ID` line with the expected `cwd=` after the last restart marker in `launches`, and `fg` printing the agent.
+- **A CLI behavior** needs the command, its output, and its exit code.
+- **A file side effect** needs a second read of the file after the action: the record appearing or disappearing, the `init.lua` diff, the log line.
+
+If a journey's precondition can't be met, report the command you tried and what was missing, and list that journey as not driven.
 
 ## Cleanup
 
@@ -97,10 +87,8 @@ Proof standards:
 $S down
 ```
 
-`down` stops this run's server by its socket and recorded pid, kills watcher processes whose command line contains this run's unique `state_dir=` path, and deletes `$BV_RUN`. It never kills by process name. Evidence in `/tmp/momento-rex-verify-evidence/<run id>/` survives. Delete that by hand once you have reported it. Run `down` after every failed attempt too, so stray servers don't pile up. Each run's socket lives in its own directory, so a stray server never collides with a new run.
+`down` stops this run's server by its socket and recorded pid, kills watchers whose command line has this run's `state_dir=`, and deletes the run dir. The evidence survives. Quote the proving lines in your report, then delete it. Run `down` after a failed attempt too. Find runs whose pointer was lost with `ls -d /tmp/momento-rex-verify.*`, and stop each with `BV_RUN=/tmp/momento-rex-verify.XXXX $S down`.
 
-If `$BV_RUN` was lost, find leftovers with `ls -d /tmp/momento-rex-verify.*`, then `BV_RUN=/tmp/momento-rex-verify.XXXX $S down` for each.
+## Adding a journey
 
-## Other checks
-
-`make test` runs the unit tests and `test/e2e.sh`, which uses the same setup as this skill and asserts 29 behaviors. Run it as a regression check, but it is not a substitute for driving the specific behavior you changed and capturing evidence.
+A feature file starts with an H1 title and one paragraph describing the user-visible behavior. Four H2 sections follow in this order: `Sub-features`, `How to get to it (user POV)`, `Driving it with sandbox` (starting with `Preconditions:`), and `Gotchas`. Leave implementation details out unless a verifier needs them to read the evidence. Add the file to the list under Journeys.

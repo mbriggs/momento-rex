@@ -20,19 +20,23 @@
 #   sandbox snap LABEL            copy screens, records, status, log into evidence
 #   sandbox down                  stop what this run started; keep the evidence
 #
-# Every command except `up` reads the run from $BV_RUN (printed by `up`).
+# Every command except `up` uses the run in $BV_RUN, or else the checkout's
+# latest run, which `up` records in tmp/sandbox-run.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 ROOT="$(cd "$HERE/../../../.." && pwd -P)"
 EVIDENCE_ROOT="${BV_EVIDENCE_ROOT:-/tmp/momento-rex-verify-evidence}"
+LATEST="$ROOT/tmp/sandbox-run"
 
 die() { printf 'sandbox: %s\n' "$*" >&2; exit 1; }
 # wait_for SECS CMD...: retry CMD every 0.2s until it succeeds.
 wait_for() { local n=$(($1 * 5)); shift; while [ $n -gt 0 ]; do "$@" && return 0; sleep 0.2; n=$((n - 1)); done; return 1; }
 
 load() {
-  [ -n "${BV_RUN:-}" ] || die "BV_RUN is not set; run: eval \"\$(sandbox up)\""
+  [ -n "${BV_RUN:-}" ] || BV_RUN="$(cat "$LATEST" 2>/dev/null)"
+  [ -n "$BV_RUN" ] || die "no run: start one with \`sandbox up\`"
+  export BV_RUN
   [ -f "$BV_RUN/run.env" ] || die "$BV_RUN is not a sandbox run (no run.env)"
   T="$BV_RUN"
   # shellcheck disable=SC1091
@@ -98,8 +102,8 @@ EOF
   cp "$T/init.lua" "$T/init.orig"
   B install --no-start > "$EVIDENCE/install.txt" 2>&1 || die "momento-rex install failed: $(cat "$EVIDENCE/install.txt")"
   start_server
-  printf 'export BV_RUN=%q\n' "$T"
-  printf '# evidence: %s\n' "$EVIDENCE"
+  mkdir -p "$ROOT/tmp" && printf '%s\n' "$T" > "$LATEST"
+  printf 'run       %s\nevidence  %s\n' "$T" "$EVIDENCE"
 }
 
 cmd_doctor() {
@@ -144,6 +148,7 @@ cmd_down() {
   # shellcheck disable=SC2086
   [ -n "$pids" ] && kill $pids 2>/dev/null
   rm -rf "$T"
+  [ "$(cat "$LATEST" 2>/dev/null)" = "$T" ] && rm -f "$LATEST"
   printf 'removed %s; evidence kept in %s\n' "$T" "$EVIDENCE"
 }
 

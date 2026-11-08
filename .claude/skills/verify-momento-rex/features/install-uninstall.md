@@ -20,7 +20,7 @@
 
 Preconditions:
 
-- A fresh run from `eval "$($S up)"`. `up` already ran `install --no-start`, and its output is in the evidence dir as `install.txt`.
+- A fresh run from `$S up`. `up` already ran `install --no-start`, and its output is in the evidence dir as `install.txt`.
 
 - **One line, user content kept.** Run `grep -c 'momento-rex:managed' "$BV_RUN/init.lua"; head -2 "$BV_RUN/init.lua" | cmp - "$BV_RUN/init.orig" && echo kept`. The output is `1` and `kept`.
 - **Second install.** Run `$S momento-rex install --no-start; echo rc=$?`. It prints `init.lua is already set up: ...` and `rc=0`, and the grep count stays 1.

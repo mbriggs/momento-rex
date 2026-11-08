@@ -7,8 +7,6 @@ description: Work in a momento-rex worktree lane. Use before the first file writ
 
 A **lane** is a linked git worktree that `bin/worktree` provisions. Write code in a lane, not in the primary checkout. The primary stays on `main`, and the user's real Rex runs momento-rex from there.
 
-momento-rex has no ports, databases, or build outputs to isolate. `make test` makes its own temp dir and private Rex server each run, so any number of lanes can run it at once. A lane's only job is to keep its work off `main` and off the user's real Rex.
-
 ## Creating a lane
 
 - In this session, call `EnterWorktree`.
@@ -34,10 +32,10 @@ A session isolated to a worktree can't run git against the primary. Call `ExitWo
 
 Lanes land through GitHub PRs into `main`, one commit per lane, which the user squash-merges.
 
-1. If the diff touches `bin/momento-rex` or `lib/momento-rex/`, `make test` alone doesn't prove it. Run [verify-momento-rex](../verify-momento-rex/SKILL.md) on every journey in its `features/` map that the change can affect, and put each journey's result and evidence path in the commit body. A lane refuses `momento-rex start`, so for `restore-watcher-only` ask the user to drive it from the primary, or list it in the body as not driven.
-2. Commit in the lane, rebased on `origin/main`.
+1. Rebase the lane on `origin/main` (`git fetch origin && git rebase origin/main`), so you verify the code that lands.
+2. If the diff touches `bin/momento-rex` or `lib/momento-rex/`, run [verify-momento-rex](../verify-momento-rex/SKILL.md) on every journey the change can affect. Quote each journey's result and the lines that prove it in the commit body, since `/tmp` evidence doesn't last. A lane refuses `momento-rex start`, and the primary runs `main`'s code, so list `restore-watcher-only` as not driven. If the diff touches what [verify-restore-model](../verify-restore-model/SKILL.md) covers, run its check too and put the result in the body. Then commit in the lane.
 3. Run `bin/worktree land` from the lane. It pushes and opens the PR, or updates the open PR's title and body from the commit. With several commits it refuses; write the message to a file and run `bin/worktree land --message FILE` to squash them.
-4. Own the PR until it merges: watch CI, answer review comments, and re-land fixes with `--message`.
+4. Until the PR merges, re-land each fix with `--message`.
 5. After the merge, run `bin/worktree sync` from the primary to fast-forward `main`.
 
 To keep working in the lane after a squash merge, run `git rebase --onto origin/main <merged PR head>`. A plain rebase replays the commits that were squashed.

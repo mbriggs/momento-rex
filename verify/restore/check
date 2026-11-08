@@ -123,7 +123,7 @@ while read -r kind sum file; do
   fi
 done < "$HERE/SYNC"
 if [ "$stale" = 1 ]; then
-  echo "       Read the change against the coverage table in SKILL.md. When the model describes it, run: verify/restore/check --sync"
+  echo "       Read the change against the coverage table in .claude/skills/verify-restore-model/model.md. When the model describes it, run: verify/restore/check --sync"
   fail=1
 fi
 
