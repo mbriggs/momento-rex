@@ -7,6 +7,10 @@ on:
     branches: [main]
   pull_request:
 
+# The jobs only read the repo.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -16,16 +20,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # shellcheck comes from mise.toml's pin; apt's is older and warns differently.
       - uses: jdx/mise-action@v2
       - run: sudo apt-get install -y luarocks
-      - run: luarocks install --local luacheck
+      - run: luarocks install --local luacheck 1.2.0
       - run: make lint
 
   unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: sudo apt-get install -y luajit
       - run: make unit
 
@@ -33,12 +41,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: make worktree
 
   model:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: sudo apt-get install -y luajit
       - uses: actions/setup-java@v4
         with:
