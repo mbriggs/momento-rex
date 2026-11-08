@@ -1,0 +1,51 @@
+# make e2e isn't here: it needs a rex binary, and Rex ships only as a Mac
+# app that a runner can't install. Run it locally before landing.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # shellcheck comes from mise.toml's pin; apt's is older and warns differently.
+      - uses: jdx/mise-action@v2
+      - run: sudo apt-get install -y luarocks
+      - run: luarocks install --local luacheck
+      - run: make lint
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y luajit
+      - run: make unit
+
+  worktree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make worktree
+
+  model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y luajit
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bunk-verify
+          key: tla2tools-1.7.4
+      - run: verify/restore/check
