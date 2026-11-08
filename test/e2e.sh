@@ -39,7 +39,13 @@ EOF
 # The test's init.lua is the one `bunk install` writes, on top of user content.
 printf -- '-- my config\nlocal x = 1\n' > "$T/init.lua"
 cp "$T/init.lua" "$T/init.orig"
-B() { env -u REX_SESSION -u REX_BLOCK REX_CONFIG="$T/init.lua" BUNK_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/bunk" "$@"; }
+# bin/bunk reaches Rex through REX_SERVER, and rex falls back to the user's own
+# server when that socket is missing. REX_BIN_DIR points bunk at a rex that
+# passes -S, which never falls back.
+mkdir -p "$T/rexshim"
+printf '#!/bin/sh\nexec %q -S %q "$@"\n' "$(command -v rex)" "$SOCK" > "$T/rexshim/rex"
+chmod +x "$T/rexshim/rex"
+B() { env -u REX_SESSION -u REX_BLOCK REX_BIN_DIR="$T/rexshim" REX_CONFIG="$T/init.lua" BUNK_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/bunk" "$@"; }
 
 start_server() {
   local unset_args
@@ -131,6 +137,9 @@ echo "restart"
 stop_server
 check "records survive the server stopping" '[ -f "$(rec "$BA")" ] && [ -f "$(rec "$BB")" ]'
 check "the watcher exits with the server" 'wait_for 10 watchers_are 0'
+# With the test server gone, bunk must not fall back to the user's Rex.
+check "status with Rex down says so, and doesn't reach another server" \
+  'out="$(B status 2>&1)"; [ $? = 4 ] && printf "%s" "$out" | grep -q "Rex isn.t running"' "$(B status 2>&1)"
 : > "$T/launches"
 start_server
 check "claude resumes in the restored pane" 'wait_for 15 launched "claude resumed $ID_A"' "$(cat "$T/launches"; tail -5 "$STATE/bunk.log")"

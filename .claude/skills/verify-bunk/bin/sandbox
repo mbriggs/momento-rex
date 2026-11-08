@@ -1,0 +1,170 @@
+#!/bin/bash
+# sandbox: a throwaway Rex server with bunk installed and fake claude/codex,
+# for driving bunk the way a user would. Never touches the user's Rex: every
+# rex call goes to the sandbox socket, and `up` aborts if the server it
+# reaches isn't that one.
+#
+#   sandbox up                    create a run, install bunk, start the server
+#   sandbox doctor                is this run's server and watcher healthy?
+#   sandbox pane NAME [DIR]       new session; prints "SESSION BLOCK"
+#   sandbox type S B TEXT         type TEXT and Enter into a pane
+#   sandbox key S B KEY           send a key, e.g. ctrl+z
+#   sandbox fg S B                foreground program of a pane (claude, codex, zsh)
+#   sandbox record B              the saved record for a pane (JSON), exit 1 if none
+#   sandbox wait SECS CMD...      retry CMD (e.g. "$S record B") until it exits 0
+#   sandbox restart               stop the server, then start it (restores panes)
+#   sandbox stop | start          the two halves of restart
+#   sandbox rex ARGS...           rex against the sandbox server
+#   sandbox bunk ARGS...          bin/bunk against the sandbox config and state
+#   sandbox launches              every agent start: "claude resumed ID cwd=... alias=1"
+#   sandbox snap LABEL            copy screens, records, status, log into evidence
+#   sandbox down                  stop what this run started; keep the evidence
+#
+# Every command except `up` reads the run from $BV_RUN (printed by `up`).
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+ROOT="$(cd "$HERE/../../../.." && pwd -P)"
+EVIDENCE_ROOT="${BV_EVIDENCE_ROOT:-/tmp/bunk-verify-evidence}"
+
+die() { printf 'sandbox: %s\n' "$*" >&2; exit 1; }
+# wait_for SECS CMD...: retry CMD every 0.2s until it succeeds.
+wait_for() { local n=$(($1 * 5)); shift; while [ $n -gt 0 ]; do "$@" && return 0; sleep 0.2; n=$((n - 1)); done; return 1; }
+
+load() {
+  [ -n "${BV_RUN:-}" ] || die "BV_RUN is not set; run: eval \"\$(sandbox up)\""
+  [ -f "$BV_RUN/run.env" ] || die "$BV_RUN is not a sandbox run (no run.env)"
+  T="$BV_RUN"
+  # shellcheck disable=SC1091
+  . "$T/run.env"
+}
+
+R() { rex -S "$SOCK" --autostart=false "$@"; }
+# bin/bunk reaches Rex through REX_SERVER, and rex falls back to the user's own
+# server when that socket is missing. REX_BIN_DIR points bunk at a shim that
+# passes -S, which never falls back.
+B() { env -u REX_SESSION -u REX_BLOCK REX_BIN_DIR="$T/rexshim" REX_CONFIG="$T/init.lua" BUNK_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/bunk" "$@"; }
+up_now() { R ls >/dev/null 2>&1; }
+server_pid() { R whoami --json 2>/dev/null | jq -r '.pid // .server.pid // empty'; }
+watchers() { pgrep -f "state_dir=$STATE" | wc -l | tr -d ' '; }
+rec_path() { printf '%s/panes/%s.json' "$STATE" "${1//:/_}"; }
+# Ready means the watcher this server started has written status.json.
+watcher_ready() { [ -f "$STATE/status.json" ] && [ "$(jq -r .token "$STATE/status.json" 2>/dev/null)" = "$(tr -d " \n" < "$STATE/watcher.token" 2>/dev/null)" ]; }
+
+start_server() {
+  local unset_args
+  unset_args="$(env | grep -E '^(REX_|CLAUDE|CODEX_|BUNK_)[A-Za-z0-9_]*=' | cut -d= -f1 | sed 's/^/-u /' | tr '\n' ' ')"
+  # shellcheck disable=SC2086
+  ( env $unset_args REX_SERVER="$SOCK" ZDOTDIR="$T/zdot" CLAUDE_CONFIG_DIR="$T/claude" CODEX_HOME="$T/codex" \
+      FAKE_LOG="$T/launches" BUNK_PERIOD=1 BUNK_GC_AFTER=6 \
+      rex server run --listen "$SOCK" --state-dir "$T/rex" --config "$T/init.lua" \
+      >> "$T/server.log" 2>&1 < /dev/null & )
+  wait_for 10 up_now || { tail -20 "$T/server.log" >&2; die "sandbox server didn't start"; }
+  R whoami --json | grep -qF "$T/s.sock" || die "ABORT: the socket answered as some other server"
+  server_pid > "$T/server.pid"
+  wait_for 10 watcher_ready || die "the watcher never wrote a current $STATE/status.json"
+}
+
+stop_server() {
+  local pid; pid="$(cat "$T/server.pid" 2>/dev/null)"
+  R server stop >/dev/null 2>&1
+  if [ -n "$pid" ]; then
+    wait_for 10 sh -c "! kill -0 $pid 2>/dev/null" || kill "$pid" 2>/dev/null
+  fi
+  rm -f "$T/server.pid"
+}
+
+cmd_up() {
+  command -v rex >/dev/null || die "rex is not on PATH"
+  command -v jq >/dev/null || die "jq is not on PATH"
+  T="$(cd "$(mktemp -d /tmp/bunk-verify.XXXX)" && pwd -P)"
+  local id; id="$(basename "$T")"
+  SOCK="unix://$T/s.sock"; STATE="$T/state"; EVIDENCE="$EVIDENCE_ROOT/$id"
+  mkdir -p "$T/bin" "$T/zdot" "$T/claude" "$T/codex" "$T/work" "$T/it's dir" "$EVIDENCE"
+  mkdir -p "$T/rexshim"
+  printf '#!/bin/sh\nexec %q -S %q "$@"\n' "$(command -v rex)" "$SOCK" > "$T/rexshim/rex"
+  chmod +x "$T/rexshim/rex"
+  printf 'SOCK=%q\nSTATE=%q\nEVIDENCE=%q\n' "$SOCK" "$STATE" "$EVIDENCE" > "$T/run.env"
+  for a in claude codex; do
+    printf '#!/bin/bash\nexec -a %s /bin/bash %q %s "$@"\n' "$a" "$ROOT/test/fake-agent.sh" "$a" > "$T/bin/$a"
+    chmod +x "$T/bin/$a"
+  done
+  cat > "$T/zdot/.zshrc" <<EOF
+PROMPT='%~ %% '
+path=("$T/bin" \$path)
+alias claude='FAKE_ALIAS=1 claude'
+EOF
+  printf -- '-- user config\nlocal x = 1\n' > "$T/init.lua"
+  cp "$T/init.lua" "$T/init.orig"
+  B install --no-start > "$EVIDENCE/install.txt" 2>&1 || die "bunk install failed: $(cat "$EVIDENCE/install.txt")"
+  start_server
+  printf 'export BV_RUN=%q\n' "$T"
+  printf '# evidence: %s\n' "$EVIDENCE"
+}
+
+cmd_doctor() {
+  local bad=0 pid
+  say() { printf '%-10s %s\n' "$1" "$2"; }
+  say run "$T"
+  if up_now && R whoami --json | grep -qF "$T/s.sock"; then
+    pid="$(server_pid)"
+    if [ "$pid" = "$(cat "$T/server.pid" 2>/dev/null)" ]; then say server "up, pid $pid, $SOCK"
+    else say server "PID MISMATCH: answering pid $pid, started $(cat "$T/server.pid" 2>/dev/null)"; bad=1; fi
+  else say server "DOWN ($SOCK)"; bad=1; fi
+  local w; w="$(watchers)"
+  if [ "$w" = 1 ]; then say watcher "1 process for this run"; else say watcher "$w processes (want 1)"; bad=1; fi
+  say bunk "$("$ROOT/bin/bunk" version) from $ROOT"
+  printf -- '--- bunk status\n'
+  B status 2>&1; local rc=$?
+  [ "$rc" = 0 ] || { printf -- '--- bunk status exited %s\n' "$rc"; bad=1; }
+  return "$bad"
+}
+
+cmd_snap() {
+  local label="$1" d s b
+  d="$EVIDENCE/$label"; mkdir -p "$d"
+  B status > "$d/status.txt" 2>&1; echo "exit=$?" >> "$d/status.txt"
+  cp -R "$STATE/panes" "$d/records" 2>/dev/null
+  cp "$STATE/bunk.log" "$d/bunk.log" 2>/dev/null
+  cp "$T/launches" "$d/launches.txt" 2>/dev/null || : > "$d/launches.txt"
+  cp "$T/init.lua" "$d/init.lua"
+  R ls --json > "$d/sessions.json" 2>/dev/null
+  for s in $(jq -r '.sessions[]?.session_id // empty' "$d/sessions.json" 2>/dev/null); do
+    for b in $(R block ls -s "$s" --json | jq -r '.blocks[].block_id'); do
+      R capture -s "$s" -b "$b" --trim > "$d/screen-${b//:/_}.txt" 2>/dev/null
+    done
+  done
+  printf '%s\n' "$d"
+}
+
+cmd_down() {
+  [ -f "$T/server.pid" ] && stop_server
+  local pids; pids="$(pgrep -f "state_dir=$STATE")"
+  [ -n "$pids" ] && kill $pids 2>/dev/null
+  rm -rf "$T"
+  printf 'removed %s; evidence kept in %s\n' "$T" "$EVIDENCE"
+}
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  up) cmd_up ;;
+  doctor) load; cmd_doctor ;;
+  pane)
+    load; [ $# -ge 1 ] || die "usage: sandbox pane NAME [DIR]"
+    s="$(R new "$1" -c "${2:-$T/work}" --json | jq -r .session_id)" || exit 1
+    printf '%s %s\n' "$s" "$(R block ls -s "$s" --json | jq -r '.blocks[0].block_id')" ;;
+  type) load; R send -s "$1" -b "$2" "$3"$'\r' >/dev/null ;;
+  key) load; R send-key -s "$1" -b "$2" "$3" >/dev/null ;;
+  fg) load; R block call -s "$1" -b "$2" process 2>/dev/null | jq -r '.foreground.argv0 // empty' | sed 's|.*/||; s/^-//' ;;
+  record) load; f="$(rec_path "$1")"; [ -f "$f" ] && cat "$f" ;;
+  wait) load; secs="$1"; shift; wait_for "$secs" "$@" >/dev/null ;;
+  restart) load; stop_server; echo "--- restart $(date +%T)" >> "$T/launches"; start_server; echo restarted ;;
+  stop) load; stop_server ;;
+  start) load; start_server ;;
+  rex) load; R "$@" ;;
+  bunk) load; B "$@" ;;
+  launches) load; cat "$T/launches" 2>/dev/null ;;
+  snap) load; [ $# = 1 ] || die "usage: sandbox snap LABEL"; cmd_snap "$1" ;;
+  down) load; cmd_down ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
+esac
