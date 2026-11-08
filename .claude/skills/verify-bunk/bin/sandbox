@@ -140,6 +140,8 @@ cmd_snap() {
 cmd_down() {
   [ -f "$T/server.pid" ] && stop_server
   local pids; pids="$(pgrep -f "state_dir=$STATE")"
+  # Unquoted on purpose: one argument per pid.
+  # shellcheck disable=SC2086
   [ -n "$pids" ] && kill $pids 2>/dev/null
   rm -rf "$T"
   printf 'removed %s; evidence kept in %s\n' "$T" "$EVIDENCE"

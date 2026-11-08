@@ -1,4 +1,6 @@
 #!/bin/bash
+# Variables read only inside check's single-quoted strings look unused.
+# shellcheck disable=SC2034
 # End-to-end test against a throwaway Rex server with fake agents.
 # Never touches the user's Rex: every call goes to unix://$T/s.sock, and the
 # test aborts if the server it reaches isn't that one.

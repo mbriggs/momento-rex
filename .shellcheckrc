@@ -1,0 +1,2 @@
+# Single quotes around $vars are how the test checks defer expansion to eval.
+disable=SC2016
