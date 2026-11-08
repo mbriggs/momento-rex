@@ -44,6 +44,14 @@ fi
 
 is_lane() { [ -f "$ROOT/.git" ]; }   # only a linked worktree has a .git file
 g() { git -C "$ROOT" "$@"; }
+# gh goes through the hallpass broker where it's installed. WORKTREE_GH
+# replaces both, so the tests can use a stub.
+gh() {
+  if [ -n "${WORKTREE_GH:-}" ]; then "$WORKTREE_GH" "$@"
+  elif [ -x /opt/hallpass/bin/hallpass ]; then /opt/hallpass/bin/hallpass gh "$@"
+  else command gh "$@"
+  fi
+}
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 tracked_changes() { [ -n "$(git -C "$1" status --porcelain --untracked-files=no)" ]; }
 
@@ -204,7 +212,9 @@ cmd_land() {
   body="$(g log -1 --format=%b)"
   pr="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
   if [ -n "$pr" ]; then
-    gh pr edit "$pr" --title "$title" --body "$body" >/dev/null
+    # gh pr edit also queries org fields, which a token with only the repo
+    # scope can't read; the REST call needs only repo.
+    (cd "$ROOT" && gh api -X PATCH "repos/{owner}/{repo}/pulls/$pr" -f title="$title" -f body="$body") >/dev/null
     say "updated PR #$pr from the commit"
   else
     gh pr create --base main --head "$branch" --title "$title" --body "$body"

@@ -38,17 +38,18 @@ for ((i = 0; i < ${#args[@]}; i++)); do
     --head) head="${args[i+1]}" ;;
     --state) state="${args[i+1]}" ;;
     --title) title="${args[i+1]}" ;;
+    -f) case "${args[i+1]}" in title=*) title="${args[i+1]#title=}" ;; esac ;;
   esac
 done
 case "$1 $2" in
   "pr list") cat "$D/$state-$head" 2>/dev/null; exit 0 ;;
   "pr create") echo "create $head $title" >> "$D/log"; echo 7 > "$D/open-$head"; echo "https://github.com/x/y/pull/7" ;;
-  "pr edit") echo "edit $3 $title" >> "$D/log" ;;
+  "api -X") [ "$3" = PATCH ] && echo "edit ${4##*/} $title" >> "$D/log" ;;
   *) echo "stub gh: unexpected: $*" >&2; exit 1 ;;
 esac
 EOF
 chmod +x "$T/stub/gh"
-export PATH="$T/stub:$PATH"
+export WORKTREE_GH="$T/stub/gh"
 
 # The repo: bin/worktree, bin/bunk, lib/bunk, .gitignore, pushed to a bare remote.
 git init -q --bare -b main "$T/origin.git"
