@@ -1,0 +1,4 @@
+# Files the model was last confirmed to describe. Written by 'check --sync'.
+commit 760ef1ad96aafe9488efb24010478af4ca93ac17 plus uncommitted changes to the covered files
+sha256 2468093f2f8cf89fefd899404abf9ee407a4def77cb92bc8b6dd71f994647430 lib/bunk/core.lua
+sha256 fccace90e6bd09ed5a931be55d6211d22c506bbc0803a762845b2290b91174ff lib/bunk/watch.lua

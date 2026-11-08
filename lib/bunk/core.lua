@@ -37,6 +37,37 @@ function M.classify(fg)
   return "other"
 end
 
+-- The pid of the pane's own shell, from the terminal's `process` result: the
+-- child itself when it is a shell, or else the process directly under the
+-- child (login on macOS). nil when Rex left the ancestor list out.
+function M.pane_shell(p)
+  if type(p) ~= "table" or type(p.child) ~= "table" then return nil end
+  if M.classify(p.child) == "shell" then return p.child.pid end
+  local fg, anc = p.foreground, p.ancestors or {}
+  if type(fg) ~= "table" or fg.pid == p.child.pid or #anc == 0 then return nil end
+  if #anc == 1 then return fg.pid end -- the list ends with the child
+  return type(anc[#anc - 1]) == "table" and anc[#anc - 1].pid or nil
+end
+
+-- An agent among the children of shell_pid in `ps -A -o pid= -o ppid= -o args=`
+-- output, as {pid, kind}. The one with prefer_pid wins; otherwise the first.
+function M.child_agent(text, shell_pid, prefer_pid)
+  shell_pid, prefer_pid = tonumber(shell_pid), tonumber(prefer_pid)
+  local found
+  for line in (text or ""):gmatch("[^\n]+") do
+    local pid, ppid, args = line:match("^%s*(%d+)%s+(%d+)%s+(.*)$")
+    if pid and tonumber(ppid) == shell_pid then
+      local kind = M.classify({ argv0 = args:match("^(%S+)") })
+      if kind == "claude" or kind == "codex" then
+        local a = { pid = tonumber(pid), kind = kind }
+        if a.pid == prefer_pid then return a end
+        found = found or a
+      end
+    end
+  end
+  return found
+end
+
 function M.valid_cwd(s)
   if type(s) ~= "string" or s:sub(1, 1) ~= "/" or #s > 1024 then return false end
   return not s:find("[%z\1-\31\127]")

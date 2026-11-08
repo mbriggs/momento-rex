@@ -2,6 +2,7 @@
 # Stands in for claude and codex, imitating the private files bunk reads:
 #   claude: writes $CLAUDE_CONFIG_DIR/sessions/<pid>.json at start, rewrites
 #           sessionId on /clear, deletes the file on exit and on SIGHUP.
+#           With $CLAUDE_CONFIG_DIR/slow-session present, it waits 4 s first.
 #           The transcript projects/<slug>/<id>.jsonl appears with the first
 #           message or /clear.
 #   codex:  opens sessions/.../rollout-<ts>-<id>.jsonl after its first
@@ -31,6 +32,8 @@ if [ "$kind" = claude ]; then
   transcript() { local d="$CLAUDE_CONFIG_DIR/projects/${PWD//[^a-zA-Z0-9]/-}"; mkdir -p "$d"; echo '{}' >> "$d/$id.jsonl"; }
   trap 'rm -f "$f"; exit 129' HUP
   trap 'rm -f "$f"' EXIT
+  # The test creates this file to make Claude slow to write its sessions file.
+  [ -f "$CLAUDE_CONFIG_DIR/slow-session" ] && sleep 4
   wr
 fi
 

@@ -52,6 +52,23 @@ for _ = 1, 200 do
 end
 check("quote round-trips through sh", ok_rt)
 
+-- pane_shell: the shell under login (macOS), or the child when it is the shell
+local login = { pid = 10, name = "login", path = "/usr/bin/login" }
+check("shell at prompt", core.pane_shell({ child = login, foreground = { pid = 11, argv0 = "-zsh" }, ancestors = { login } }) == 11)
+check("vim under shell", core.pane_shell({ child = login, foreground = { pid = 12, argv0 = "vim" },
+  ancestors = { { pid = 11 }, login } }) == 11)
+check("editor under claude", core.pane_shell({ child = login, foreground = { pid = 13, argv0 = "vim" },
+  ancestors = { { pid = 12 }, { pid = 11 }, login } }) == 11)
+check("child is the shell", core.pane_shell({ child = { pid = 20, path = "/bin/bash" }, foreground = { pid = 21 } }) == 20)
+check("no ancestors: unknown", core.pane_shell({ child = login, foreground = { pid = 12, argv0 = "vim" } }) == nil)
+
+-- child_agent: agents among the shell's children, from ps
+local PS = "  1     0 /sbin/launchd\n 30    11 vim notes\n 31    11 claude --resume x\n 32    11 codex resume y\n 33    99 claude\n"
+check("child agent", (core.child_agent(PS, 11) or {}).pid == 31)
+check("child agent prefers the recorded pid", (core.child_agent(PS, 11, 32) or {}).kind == "codex")
+check("other shells' agents don't count", core.child_agent(" 33    99 claude\n", 11) == nil)
+check("no ps output", core.child_agent(nil, 11) == nil)
+
 -- parsers
 check("claude file ok", (core.claude_chat({ pid = 5, sessionId = ID, kind = "interactive", cwd = "/a" }, 5) or {}).id == ID)
 check("claude pid mismatch", core.claude_chat({ pid = 6, sessionId = ID, kind = "interactive" }, 5) == nil)

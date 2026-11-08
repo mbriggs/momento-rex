@@ -76,14 +76,48 @@ do -- keep the log under 1 MB
   end
 end
 
--- Newest watcher wins: a config reload starts another one, and the older
--- one stops at its next event or tick. Uninstall overwrites the token too.
+-- Newest watcher wins: a config reload or `bunk start` starts another one,
+-- and the older one stops at its next event or tick. Uninstall overwrites
+-- the token too. The new watcher takes no step until the one it replaces
+-- has exited, so two watchers never act at once: one could otherwise
+-- overwrite a record the other just saved, or write "resuming" and stop
+-- before typing (verify/restore, finding F3).
 local TOKEN_FILE = STATE .. "/watcher.token"
+local PID_FILE = STATE .. "/watcher.pid"
 local token = trim(rex.exec({ "uuidgen" }).stdout)
 if token == "" then token = tostring(os.time()) .. tostring(os.clock()) .. tostring({}) end
+local my_pid = tonumber(trim(rex.exec({ "sh", "-c", "echo $PPID" }).stdout))
+
+local function is_watcher(pid)
+  if not pid or pid == my_pid then return false end
+  local r = rex.exec({ "ps", "-ww", "-o", "args=", "-p", tostring(pid) })
+  return r and r.ok and r.stdout:find("watch.lua", 1, true) ~= nil
+end
+
+-- The pid file names the latest watcher, waiting or running. Each watcher
+-- waits for the one named before it, which waited for its own predecessor.
+local predecessor = tonumber(trim(read(PID_FILE)))
+write_atomic(PID_FILE, tostring(my_pid or "") .. "\n")
 write_atomic(TOKEN_FILE, token .. "\n")
-local started = now()
 log("start", core.VERSION, token)
+do
+  local waited = 0
+  while is_watcher(predecessor) and waited < 15 do
+    rex.sleep(0.2)
+    waited = waited + 0.2
+  end
+  if is_watcher(predecessor) then
+    log("stop", predecessor, "(previous watcher still running after 15s; killing it)")
+    rex.exec({ "kill", tostring(predecessor) })
+    rex.sleep(1)
+  end
+end
+if trim(read(TOKEN_FILE)) ~= token then
+  log("stop", token, "(replaced while waiting for the previous watcher)")
+  rex.stop(0)
+  return
+end
+local started = now()
 
 -- rex.stop may unwind by raising, and pcall would swallow that, so callers
 -- check the flag and stop again outside their pcall.
@@ -211,15 +245,44 @@ local function observe(session_id, block_id)
   }
   if not o.kind then return { ok = false } end
   o.fg_cwd = fg.cwd
+  o.fg_pid = fg.pid
   -- The pane's own shell sits directly under the terminal's child (login on
   -- macOS), so its ancestor list holds at most that one process.
   o.at_prompt = o.kind == "shell" and #(p.ancestors or {}) <= 1
   o.shell_cwd = fg.cwd
+  o.shell_pid = core.pane_shell(p)
   if o.kind == "claude" or o.kind == "codex" then
     o.agent = { pid = fg.pid, start = lstart(fg.pid) }
     o.chat = find_chat(o.kind, fg.pid, block_id)
   end
   return o
+end
+
+-- An agent that is a child of the pane's shell without being in front:
+-- Ctrl-Z'd, running an editor, or back in front since observe(). Without
+-- this, a resumed chat bunk hadn't yet seen in front would be forgotten as
+-- "resume did not start" while it ran (verify/restore, finding F2).
+local function pane_agent(o, rec)
+  if not o.shell_pid then return end
+  local r = rex.exec({ "ps", "-A", "-ww", "-o", "pid=", "-o", "ppid=", "-o", "args=" })
+  local a = core.child_agent(r and r.ok and r.stdout, o.shell_pid, rec.agent_pid)
+  if not a then return end
+  o.kind, o.at_prompt = a.kind, false
+  o.agent = { pid = a.pid, start = lstart(a.pid) }
+  o.chat = find_chat(a.kind, a.pid, o.block_id)
+end
+
+-- Just before typing, look again: is the pane's own shell, the one observe()
+-- saw, still in front at its prompt? Rex's write has no condition, so this
+-- leaves only the time of one call for the user to start something else
+-- (verify/restore, finding F1).
+local function still_at_prompt(o)
+  local p = rex.block.call(T, "process", { session_id = o.session_id, block_id = o.block_id })
+  if type(p) ~= "table" or type(p.child) ~= "table" or type(p.foreground) ~= "table" then return false end
+  return tostring(p.child.pid) .. "@" .. (lstart(p.child.pid) or "") == o.inc
+    and p.foreground.pid == o.fg_pid
+    and core.classify(p.foreground) == "shell"
+    and #(p.ancestors or {}) <= 1
 end
 
 local exit_seen = {}
@@ -228,14 +291,18 @@ function step(session_id, block_id)
   local o = observe(session_id, block_id)
   if not o.ok then return false end
   local rec = load(block_id)
+  if rec and o.kind ~= "claude" and o.kind ~= "codex" then pane_agent(o, rec) end
   if rec and rec.agent_pid then
     o.agent_alive = rec.agent_start ~= nil and lstart(rec.agent_pid, true) == rec.agent_start
   end
   o.exit_seen = exit_seen[block_id]
   local marked = false
-  for _, a in ipairs(core.decide(rec, o, now())) do
+  -- One token check for the whole list: a watcher that stops between
+  -- writing "resuming" and typing would leave that resume untyped.
+  local actions = core.decide(rec, o, now())
+  if #actions > 0 and not guard() then return false end
+  for _, a in ipairs(actions) do
     local what = a[1]
-    if not guard() then return false end
     if what == "write" then
       save(block_id, a[2])
       if not rec or rec.chat_id ~= a[2].chat_id or rec.state ~= a[2].state then
@@ -245,8 +312,13 @@ function step(session_id, block_id)
       remove(block_id)
       log("forget", block_id, rec and rec.chat_id or "", a[2])
     elseif what == "type" then
-      rex.block.call(T, "write", { session_id = session_id, block_id = block_id, data = a[2] })
-      log("resume", block_id, rec.agent, rec.chat_id)
+      if still_at_prompt(o) then
+        rex.block.call(T, "write", { session_id = session_id, block_id = block_id, data = a[2] })
+        log("resume", block_id, rec.agent, rec.chat_id)
+      else
+        save(block_id, rec) -- as it was, so a later pass types it
+        log("resume", block_id, rec.agent, rec.chat_id, "(deferred: the prompt is busy)")
+      end
     elseif what == "mark_exit" then
       marked = true
       exit_seen[block_id] = exit_seen[block_id] or now()
