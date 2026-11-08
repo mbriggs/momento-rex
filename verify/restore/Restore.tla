@@ -10,7 +10,7 @@
 (*   Guard / Do /     step, guard,             lib/bunk/watch.lua          *)
 (*   Recheck / Type / still_at_prompt                                      *)
 (*   Finish                                                                *)
-(*   StopIdle         guard() in flush, full_pass                          *)
+(*   StopIdle         guard() in full_pass                                 *)
 (*   StartWatcher /   startup: watcher.pid, watcher.token, the wait        *)
 (*   Wait             for the previous watcher; bin/bunk start_watcher     *)
 (*   Restart          a Rex server restart: the old watcher exits with the *)
@@ -254,7 +254,7 @@ Finish(w) ==
   /\ wGuarded' = [wGuarded EXCEPT ![w] = FALSE]
   /\ UNCHANGED <<world, disk, wAlive, wActs, counts, ghosts>>
 
-\* guard() at the top of flush() and full_pass(): an idle watcher whose
+\* guard() at the top of full_pass(): an idle watcher whose
 \* token was replaced stops.
 StopIdle(w) ==
   /\ wAlive[w] /\ wPc[w] = "idle" /\ token # w

@@ -17,7 +17,7 @@ Rex starts the watcher from init.lua and stops it when the server stops:
 ```
 init.lua ──► rex do lib/bunk/watch.lua --all      (one per server; on reload the new one
                                                     waits for the old one to exit, then takes over)
-               every 3s and on each foreground change, for every pane:
+               every 3s, for every pane:
                  agent in front  → save {agent, chat id, folder, shell identity}
                  agent exited    → forget the chat (confirmed on a second look)
                  agent suspended → keep it (Ctrl-Z)

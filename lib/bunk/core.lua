@@ -100,14 +100,6 @@ function M.claude_chat(t, pid)
   return { id = t.sessionId, cwd = M.valid_cwd(t.cwd) and t.cwd or nil }
 end
 
--- Claude keeps a chat's transcript in projects/<slug>/<id>.jsonl, where the
--- slug is the folder with every non-alphanumeric byte turned into "-". The
--- transcript appears with the first message (or /clear); until then
--- `claude --resume <id>` fails with "No conversation found".
-function M.claude_slug(cwd)
-  return (cwd:gsub("[^%w]", "-"))
-end
-
 -- `lsof -Fn` output for a Codex process. Returns {id = ...} for the newest
 -- open rollout, nil when none is open, and a problem string when a .jsonl
 -- under sessions/ is open but isn't named the way bunk expects.
