@@ -38,23 +38,23 @@ CONSTANTS
   RESUME_GRACE,  \* core.RESUME_GRACE
   Handoff,       \* TRUE: `momento-rex start` or a config reload can start a second watcher
                  \* while one runs. FALSE: watchers only change at a Rex restart.
-  FenceMidStep,  \* TRUE: the user, the agent, and the clock hold still while a
+  FenceMidStep   \* TRUE: the user, the agent, and the clock hold still while a
                  \* watcher is between its observe() and its last action
                  \* (finding F1). Other watchers and Rex restarts still move.
-  FenceResume    \* TRUE: the shell runs a typed resume line before RESUME_GRACE
-                 \* runs out (the rest of finding F2).
 
 Watchers == 1..MaxWatchers
 Shells   == 1..(MaxRestarts + 1)
 
 \* No record on disk. state = "none" stands for the missing panes/<block>.json.
 NoRec  == [chat |-> 0, inc |-> 0, pid |-> 0, state |-> "none", at |-> 0]
-NoObs  == [kind |-> "shell", atPrompt |-> FALSE, inc |-> 0, pid |-> 0, chat |-> 0]
+NoObs  == [kind |-> "shell", atPrompt |-> FALSE, ready |-> FALSE, inc |-> 0, pid |-> 0, chat |-> 0]
 Act(op, r, c) == [op |-> op, r |-> r, chat |-> c]
 
 VARIABLES
   \* --- the pane ---
   shell,      \* which shell this is; a restore makes a new one. o.inc in core.decide
+  ready,      \* its rc files are done and its line editor reads input: the tty
+              \* is non-canonical at the prompt. o.line_ready in core.decide
   top,        \* the shell's own foreground when no agent is in front:
               \*   "prompt" | "other" (vim) | "nested" (a subshell; not at_prompt)
   ag,         \* the agent: "none" | "fg" (in front) | "sub" (it runs vim etc.) | "susp" (Ctrl-Z)
@@ -77,7 +77,7 @@ VARIABLES
   owed,       \* chat momento-rex had saved and running at the last restart, not yet resumed
   lost        \* a restart found a saved, running chat missing from the record
 
-world   == <<shell, top, ag, apid, achat, sess, transcript, pending>>
+world   == <<shell, ready, top, ag, apid, achat, sess, transcript, pending>>
 disk    == <<rec, token>>
 wvars   == <<wAlive, wPc, wObs, wActs, wGuarded, wMarked, wExit>>
 counts  == <<now, restarts, nextPid, nextChat, nextW>>
@@ -102,8 +102,9 @@ Decide(r, o, t, alive, es) ==
     IN IF id = 0 \/ Same(r, want) THEN <<>> ELSE << Act("write", want, 0) >>
   ELSE IF r.state = "none" THEN <<>>
   ELSE IF r.inc # o.inc THEN
-    \* A new shell: only type into the pane's own shell prompt.
-    IF ~o.atPrompt THEN <<>>
+    \* A new shell: only type into the pane's own shell prompt, once its
+    \* line editor reads.
+    IF ~o.atPrompt \/ ~o.ready THEN <<>>
     ELSE << Act("write", [r EXCEPT !.inc = o.inc, !.state = "resuming", !.at = t], 0),
             Act("type", r, r.chat) >>   \* r: the record to put back if Recheck fails
   ELSE IF r.state = "resuming" /\ t - r.at < RESUME_GRACE THEN <<>>
@@ -123,20 +124,25 @@ Observed ==
               ELSE "shell"
   IN [kind     |-> kind,
       atPrompt |-> kind = "shell" /\ top = "prompt",
+      ready    |-> ready,   \* line_ready(): Rex's input_mode, not canonical
       inc      |-> shell,
       pid      |-> IF ag = "fg" THEN apid ELSE 0,
       chat     |-> IF ag = "fg" /\ sess /\ achat \in transcript THEN achat ELSE 0]
 
 AtPrompt == top = "prompt" /\ ag \in {"none", "susp"}
 
-\* The fences. Each one rules out a known finding so the rest of the model
-\* can still be checked; SKILL.md lists them with their findings.
+\* The fence rules out the open finding so the rest of the model can still be
+\* checked; SKILL.md lists it.
 StepsIdle == FenceMidStep => \A w \in Watchers : wAlive[w] => wPc[w] \in {"idle", "waiting"}
-MayTick == FenceResume => pending = 0
+
+\* An assumption, not a fence: a line typed while the line editor reads starts
+\* the agent before RESUME_GRACE. A line typed during rc files can wait
+\* there for any length of time.
+MayTick == pending = 0 \/ ~ready
 
 -----------------------------------------------------------------------------
 Init ==
-  /\ shell = 1 /\ top = "prompt" /\ ag = "none" /\ apid = 0 /\ achat = 0
+  /\ shell = 1 /\ ready = FALSE /\ top = "prompt" /\ ag = "none" /\ apid = 0 /\ achat = 0
   /\ sess = FALSE /\ transcript = {} /\ pending = 0
   /\ rec = NoRec /\ token = 1
   /\ wAlive = [w \in Watchers |-> w = 1]
@@ -169,7 +175,7 @@ Observe(w) ==
 \* The agent as pane_agent() finds it among the pane shell's children:
 \* Ctrl-Z'd, running an editor, or back in front since observe().
 BackgroundObs(o) ==
-  [kind |-> "agent", atPrompt |-> FALSE, inc |-> o.inc, pid |-> apid,
+  [kind |-> "agent", atPrompt |-> FALSE, ready |-> FALSE, inc |-> o.inc, pid |-> apid,
    chat |-> IF sess /\ achat \in transcript THEN achat ELSE 0]
 
 \* load(); pane_agent() when there is a record and no agent was in front;
@@ -243,7 +249,7 @@ Type(w) ==
                /\ UNCHANGED pending
   /\ wActs' = [wActs EXCEPT ![w] = Tail(@)]
   /\ wPc' = [wPc EXCEPT ![w] = "acting"]
-  /\ UNCHANGED <<shell, top, ag, apid, achat, sess, transcript, disk, wAlive, wObs,
+  /\ UNCHANGED <<shell, ready, top, ag, apid, achat, sess, transcript, disk, wAlive, wObs,
                  wGuarded, wMarked, wExit, counts, known, lost>>
 
 \* End of step: exit_seen is cleared unless this step marked it.
@@ -297,7 +303,7 @@ Restart ==
          saved   == rec.state # "none" /\ rec.chat = running
      IN /\ owed' = IF running # 0 /\ saved THEN running ELSE 0
         /\ lost' = (lost \/ (ag # "none" /\ known # 0 /\ known = achat /\ ~saved))
-  /\ shell' = shell + 1 /\ top' = "prompt" /\ ag' = "none" /\ apid' = 0
+  /\ shell' = shell + 1 /\ ready' = FALSE /\ top' = "prompt" /\ ag' = "none" /\ apid' = 0
   /\ achat' = 0 /\ sess' = FALSE /\ pending' = 0
   /\ token' = nextW
   /\ wAlive' = [w \in Watchers |-> w = nextW]
@@ -320,64 +326,68 @@ Tick == now < MaxTime /\ MayTick /\ StepsIdle /\ now' = now + 1
 Quiet == StepsIdle /\ UNCHANGED <<disk, wvars, counts, typed, badType, lost>>
 
 StartAgent ==   \* the user types `claude` at the prompt: a new chat, no transcript yet
-  /\ StepsIdle /\ AtPrompt /\ ag = "none" /\ pending = 0
+  /\ StepsIdle /\ ready /\ AtPrompt /\ ag = "none" /\ pending = 0
   /\ nextPid <= MaxPids /\ nextChat <= MaxChats
   /\ ag' = "fg" /\ apid' = nextPid /\ achat' = nextChat /\ sess' = FALSE
   /\ nextPid' = nextPid + 1 /\ nextChat' = nextChat + 1
   /\ known' = 0 /\ owed' = 0
-  /\ UNCHANGED <<shell, top, transcript, pending, disk, wvars, now, restarts, nextW,
+  /\ UNCHANGED <<shell, ready, top, transcript, pending, disk, wvars, now, restarts, nextW,
                  typed, badType, lost>>
 
 ResumeRuns ==   \* the typed `claude --resume ID` starts
-  /\ pending # 0 /\ top = "prompt" /\ ag \in {"none", "susp"} /\ nextPid <= MaxPids
+  /\ pending # 0 /\ ready /\ top = "prompt" /\ ag \in {"none", "susp"} /\ nextPid <= MaxPids
   /\ ag' = "fg" /\ apid' = nextPid /\ achat' = pending /\ sess' = FALSE /\ pending' = 0
   /\ nextPid' = nextPid + 1
   /\ known' = pending                    \* the record already holds this chat
   /\ owed' = IF owed = pending THEN 0 ELSE owed
-  /\ UNCHANGED <<shell, top, transcript, disk, wvars, now, restarts, nextChat, nextW,
+  /\ UNCHANGED <<shell, ready, top, transcript, disk, wvars, now, restarts, nextChat, nextW,
                  typed, badType, lost>>
 
 ResumeFails ==  \* `claude --resume` can't open the chat
   /\ pending # 0 /\ pending' = 0 /\ owed' = 0
-  /\ UNCHANGED <<shell, top, ag, apid, achat, sess, transcript, known>> /\ Quiet
+  /\ UNCHANGED <<shell, ready, top, ag, apid, achat, sess, transcript, known>> /\ Quiet
 
 WriteSession == \* Claude writes sessions/<pid>.json a moment after it starts
   /\ ag # "none" /\ ~sess /\ sess' = TRUE
-  /\ UNCHANGED <<shell, top, ag, apid, achat, transcript, pending, known, owed>> /\ Quiet
+  /\ UNCHANGED <<shell, ready, top, ag, apid, achat, transcript, pending, known, owed>> /\ Quiet
 
 Message ==      \* first message: the transcript appears
   /\ ag = "fg" /\ achat \notin transcript
   /\ transcript' = transcript \cup {achat}
-  /\ UNCHANGED <<shell, top, ag, apid, achat, sess, pending, known, owed>> /\ Quiet
+  /\ UNCHANGED <<shell, ready, top, ag, apid, achat, sess, pending, known, owed>> /\ Quiet
 
 Clear ==        \* /clear: same process, new chat id, transcript appears at once
   /\ StepsIdle /\ ag = "fg" /\ nextChat <= MaxChats
   /\ achat' = nextChat /\ transcript' = transcript \cup {nextChat}
   /\ nextChat' = nextChat + 1
   /\ known' = 0      \* momento-rex may lag a /clear until its next pass (README "Limits")
-  /\ UNCHANGED <<shell, top, ag, apid, sess, pending, owed, disk, wvars,
+  /\ UNCHANGED <<shell, ready, top, ag, apid, sess, pending, owed, disk, wvars,
                  now, restarts, nextPid, nextW, typed, badType, lost>>
 
 Quit ==
   /\ ag = "fg"
   /\ ag' = "none" /\ apid' = 0 /\ achat' = 0 /\ sess' = FALSE /\ known' = 0
-  /\ UNCHANGED <<shell, top, transcript, pending, owed>> /\ Quiet
+  /\ UNCHANGED <<shell, ready, top, transcript, pending, owed>> /\ Quiet
 
 Suspend ==  /\ ag = "fg" /\ ag' = "susp"
-            /\ UNCHANGED <<shell, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+            /\ UNCHANGED <<shell, ready, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
 Resume ==   /\ ag = "susp" /\ top = "prompt" /\ pending = 0 /\ ag' = "fg"
-            /\ UNCHANGED <<shell, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+            /\ UNCHANGED <<shell, ready, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
 SubStart == /\ ag = "fg" /\ ag' = "sub"
-            /\ UNCHANGED <<shell, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+            /\ UNCHANGED <<shell, ready, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
 SubEnd ==   /\ ag = "sub" /\ ag' = "fg"
-            /\ UNCHANGED <<shell, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+            /\ UNCHANGED <<shell, ready, top, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+
+ShellReady ==  \* rc files finish; the line editor starts reading
+  /\ ~ready /\ ready' = TRUE
+  /\ UNCHANGED <<shell, top, ag, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
 
 ShellRuns(what) ==  \* vim, or a nested shell, from the prompt
-  /\ AtPrompt /\ pending = 0 /\ top' = what
-  /\ UNCHANGED <<shell, ag, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+  /\ ready /\ AtPrompt /\ pending = 0 /\ top' = what
+  /\ UNCHANGED <<shell, ready, ag, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
 ShellBack ==
   /\ top # "prompt" /\ top' = "prompt"
-  /\ UNCHANGED <<shell, ag, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
+  /\ UNCHANGED <<shell, ready, ag, apid, achat, sess, transcript, pending, known, owed>> /\ Quiet
 
 -----------------------------------------------------------------------------
 Next ==
@@ -386,7 +396,7 @@ Next ==
   \/ StartWatcher \/ Restart \/ Tick
   \/ StartAgent \/ ResumeRuns \/ ResumeFails \/ WriteSession \/ Message \/ Clear
   \/ Quit \/ Suspend \/ Resume \/ SubStart \/ SubEnd
-  \/ ShellRuns("other") \/ ShellRuns("nested") \/ ShellBack
+  \/ ShellReady \/ ShellRuns("other") \/ ShellRuns("nested") \/ ShellBack
 
 Spec == Init /\ [][Next]_vars
 
@@ -394,7 +404,7 @@ Spec == Init /\ [][Next]_vars
 (* Properties. Each is one sentence in SKILL.md. *)
 
 TypeOK ==
-  /\ shell \in Shells /\ top \in {"prompt", "other", "nested"}
+  /\ shell \in Shells /\ ready \in BOOLEAN /\ top \in {"prompt", "other", "nested"}
   /\ ag \in {"none", "fg", "sub", "susp"}
   /\ rec.state \in {"none", "live", "resuming"}
   /\ token \in Watchers

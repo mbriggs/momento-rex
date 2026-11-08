@@ -15,8 +15,9 @@ fail=0
 # removes only one of them breaks nothing, so those mutants remove both.
 # name | perl edit to lib/momento-rex/core.lua ("-" = watch.lua only, not table-checked) | perl edit to Restore.tla | cfg | property
 MUTANTS=(
-  'no-prompt-checks|s/^    if not o\.at_prompt then return \{\} end\n//m|s{IF ~o\.atPrompt THEN <<>>}{IF FALSE THEN <<>>}; s{IF AtPrompt /\\ shell = wObs\[w\]\.inc}{IF TRUE}|Restore|ResumeLandsAtPrompt'
+  'no-prompt-checks|s/if not o\.at_prompt or o\.line_ready == false then/if o.line_ready == false then/|s{IF ~o\.atPrompt \\/ ~o\.ready THEN}{IF ~o.ready THEN}; s{IF AtPrompt /\\ shell = wObs\[w\]\.inc}{IF TRUE}|Restore|ResumeLandsAtPrompt'
   'keep-old-inc|s/r2\.inc, r2\.state, r2\.resumed_at = o\.inc, "resuming", now/r2.state, r2.resumed_at = "resuming", now/|s/\[r EXCEPT !\.inc = o\.inc, !\.state/[r EXCEPT !.state/|Restore|OneResumePerShell'
+  'no-ready-gate|s/if not o\.at_prompt or o\.line_ready == false then/if not o.at_prompt then/|s{IF ~o\.atPrompt \\/ ~o\.ready THEN}{IF ~o.atPrompt THEN}|Restore|SavedChatSurvives'
   'no-pane-agent|-|s{IF rec\.state # "none" /\\ wObs\[w\]\.kind # "agent" /\\ ag # "none"}{IF FALSE}|Restore|SavedChatSurvives'
   'no-liveness-checks|s/^  if o\.agent_alive then return \{\} end[^\n]*\n//m|s/  ELSE IF alive THEN <<>>\n//; s{IF rec\.state # "none" /\\ wObs\[w\]\.kind # "agent" /\\ ag # "none"}{IF FALSE}|Restore|SavedChatSurvives'
   'no-wait|-|s{/\\ \\A v \\in Watchers : v < w => ~wAlive\[v\]}{/\\ TRUE}|Handoff|OneResumePerShell'

@@ -119,6 +119,8 @@ check("exit confirmed deletes", acts(core.decide(live, obs({ kind = "shell", at_
 a = core.decide(live, obs({ inc = INC2, kind = "shell", at_prompt = true, shell_cwd = "/a" }), 50)
 check("restored pane resumes", acts(a) == "write,type" and a[1][2].state == "resuming" and a[1][2].inc == INC2
   and a[2][2] == "\21claude --resume " .. ID .. "\r")
+check("restored pane, rc still running waits", acts(core.decide(live, obs({ inc = INC2, kind = "shell", at_prompt = true, line_ready = false }), 50)) == "")
+check("restored pane, line editor reading types", acts(core.decide(live, obs({ inc = INC2, kind = "shell", at_prompt = true, line_ready = true }), 50)) == "write,type")
 check("restored pane, nested shell waits", acts(core.decide(live, obs({ inc = INC2, kind = "shell", at_prompt = false }), 50)) == "")
 check("restored pane, vim waits", acts(core.decide(live, obs({ inc = INC2, kind = "other" }), 50)) == "")
 check("restored pane, user started claude", acts(core.decide(live,

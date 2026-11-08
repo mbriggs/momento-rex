@@ -153,6 +153,8 @@ end
 --   kind        classify(foreground)
 --   at_prompt   the foreground is the pane's own shell (not a nested one)
 --   shell_cwd   the shell's cwd when at_prompt
+--   line_ready  false while the tty is canonical: the shell's line editor
+--               isn't reading yet. nil when unknown (counts as ready).
 --   agent       {pid, start} of the foreground agent
 --   chat        {id, cwd} found for that agent, or nil
 --   agent_alive the record's agent pid still runs with the same start time
@@ -182,8 +184,10 @@ function M.decide(rec, o, now)
 
   if rec.inc ~= o.inc then
     -- A new shell: Rex restored this pane. Only type into the pane's own
-    -- shell prompt, never into vim or a nested shell.
-    if not o.at_prompt then return {} end
+    -- shell prompt, never into vim or a nested shell. Wait while its line
+    -- editor isn't reading yet (rc files still running): a line typed then
+    -- sits unread, and RESUME_GRACE can run out before it starts.
+    if not o.at_prompt or o.line_ready == false then return {} end
     local line, why = M.resume_line(rec, o.shell_cwd)
     if not line then
       return { { "problem", "resume.unsafe", why }, { "delete", "unsafe record: " .. why } }

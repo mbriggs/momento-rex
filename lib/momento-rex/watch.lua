@@ -284,6 +284,30 @@ local function still_at_prompt(o)
     and #(p.ancestors or {}) <= 1
 end
 
+-- Is the shell's line editor reading input? zsh, bash, and fish turn the
+-- tty's canonical mode off while they read a command. While rc files still
+-- run, it is on, and a typed line would sit unread while RESUME_GRACE runs
+-- out (verify/restore, finding F2). nil when Rex can't say.
+local waiting = {} -- per pane: since when a resume has waited on a canonical tty
+local function line_ready(o)
+  local m = rex.block.call(T, "input_mode", { session_id = o.session_id, block_id = o.block_id })
+  if type(m) ~= "table" or type(m.canonical) ~= "boolean" then return nil end
+  if not m.canonical then
+    waiting[o.block_id] = nil
+    return true
+  end
+  local w = waiting[o.block_id]
+  if not w or w.inc ~= o.inc then
+    w = { inc = o.inc, since = now() }
+    waiting[o.block_id] = w
+  end
+  if now() - w.since > 60 then
+    problem(o.block_id, "resume.waiting",
+      "the restored shell's tty has been canonical for 60s, so momento-rex hasn't typed the resume; it types it once a line editor reads")
+  end
+  return false
+end
+
 local exit_seen = {}
 
 local function step(session_id, block_id)
@@ -291,6 +315,7 @@ local function step(session_id, block_id)
   if not o.ok then return false end
   local rec = load(block_id)
   if rec and o.kind ~= "claude" and o.kind ~= "codex" then pane_agent(o, rec) end
+  if rec and rec.inc ~= o.inc and o.at_prompt then o.line_ready = line_ready(o) end
   if rec and rec.agent_pid then
     o.agent_alive = rec.agent_start ~= nil and lstart(rec.agent_pid) == rec.agent_start
   end
@@ -395,7 +420,7 @@ local function full_pass()
     end
   end
   if complete then
-    for _, t in ipairs({ exit_seen, unreadable, transcript_found }) do
+    for _, t in ipairs({ exit_seen, unreadable, transcript_found, waiting }) do
       for k in pairs(t) do if not seen[k] then t[k] = nil end end
     end
   end

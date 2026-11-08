@@ -16,13 +16,13 @@ Recs == {NoRec} \cup
   [chat : Chats, inc : Incs, pid : Pids, state : {"resuming"}, at : Times]
 
 Obss ==
-  [kind : {"agent"}, atPrompt : {FALSE}, inc : Incs, pid : Pids, chat : {0} \cup Chats] \cup
-  [kind : {"shell"}, atPrompt : BOOLEAN, inc : Incs, pid : {0}, chat : {0}] \cup
-  [kind : {"other"}, atPrompt : {FALSE}, inc : Incs, pid : {0}, chat : {0}]
+  [kind : {"agent"}, atPrompt : {FALSE}, ready : {FALSE}, inc : Incs, pid : Pids, chat : {0} \cup Chats] \cup
+  [kind : {"shell"}, atPrompt : BOOLEAN, ready : BOOLEAN, inc : Incs, pid : {0}, chat : {0}] \cup
+  [kind : {"other"}, atPrompt : {FALSE}, ready : {FALSE}, inc : Incs, pid : {0}, chat : {0}]
 
 S(x) == ToString(x)
 RecStr(r) == r.state \o "," \o S(r.chat) \o "," \o S(r.inc) \o "," \o S(r.pid) \o "," \o S(r.at)
-ObsStr(o) == o.kind \o "," \o S(o.atPrompt) \o "," \o S(o.inc) \o "," \o S(o.pid) \o "," \o S(o.chat)
+ObsStr(o) == o.kind \o "," \o S(o.atPrompt) \o "," \o S(o.inc) \o "," \o S(o.pid) \o "," \o S(o.chat) \o "," \o S(o.ready)
 ActStr(a) ==
   CASE a.op = "write" -> "write:" \o RecStr(a.r)
     [] a.op = "type"  -> "type:" \o S(a.chat)
