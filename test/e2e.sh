@@ -7,7 +7,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
-T="$(cd "$(mktemp -d /tmp/bunk-e2e.XXXX)" && pwd -P)"
+T="$(cd "$(mktemp -d /tmp/momento-rex-e2e.XXXX)" && pwd -P)"
 SOCK="unix://$T/s.sock"
 STATE="$T/state"
 SERVER_PID=""
@@ -38,23 +38,23 @@ path=("$T/bin" \$path)
 alias claude='FAKE_ALIAS=1 claude'
 EOF
 
-# The test's init.lua is the one `bunk install` writes, on top of user content.
+# The test's init.lua is the one `momento-rex install` writes, on top of user content.
 printf -- '-- my config\nlocal x = 1\n' > "$T/init.lua"
 cp "$T/init.lua" "$T/init.orig"
-# bin/bunk reaches Rex through REX_SERVER, and rex falls back to the user's own
-# server when that socket is missing. REX_BIN_DIR points bunk at a rex that
+# bin/momento-rex reaches Rex through REX_SERVER, and rex falls back to the user's own
+# server when that socket is missing. REX_BIN_DIR points momento-rex at a rex that
 # passes -S, which never falls back.
 mkdir -p "$T/rexshim"
 printf '#!/bin/sh\nexec %q -S %q "$@"\n' "$(command -v rex)" "$SOCK" > "$T/rexshim/rex"
 chmod +x "$T/rexshim/rex"
-B() { env -u REX_SESSION -u REX_BLOCK REX_BIN_DIR="$T/rexshim" REX_CONFIG="$T/init.lua" BUNK_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/bunk" "$@"; }
+B() { env -u REX_SESSION -u REX_BLOCK REX_BIN_DIR="$T/rexshim" REX_CONFIG="$T/init.lua" MOMENTO_REX_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/momento-rex" "$@"; }
 
 start_server() {
   local unset_args
-  unset_args="$(env | grep -E '^(REX_|CLAUDE|CODEX_|BUNK_)[A-Za-z0-9_]*=' | cut -d= -f1 | sed 's/^/-u /' | tr '\n' ' ')"
+  unset_args="$(env | grep -E '^(REX_|CLAUDE|CODEX_|MOMENTO_REX_)[A-Za-z0-9_]*=' | cut -d= -f1 | sed 's/^/-u /' | tr '\n' ' ')"
   # shellcheck disable=SC2086
   ( env $unset_args REX_SERVER="$SOCK" ZDOTDIR="$T/zdot" CLAUDE_CONFIG_DIR="$T/claude" CODEX_HOME="$T/codex" \
-      FAKE_LOG="$T/launches" BUNK_PERIOD=1 BUNK_GC_AFTER=6 \
+      FAKE_LOG="$T/launches" MOMENTO_REX_PERIOD=1 MOMENTO_REX_GC_AFTER=6 \
       rex server run --listen "$SOCK" --state-dir "$T/rex" --config "$T/init.lua" \
       >> "$T/server.log" 2>&1 < /dev/null & )
   wait_for 10 up || { echo "test server didn't start"; cat "$T/server.log"; exit 1; }
@@ -89,16 +89,16 @@ server_gone() { ! kill -0 "$SERVER_PID" 2>/dev/null; }
 echo "install"
 B install --no-start >/dev/null
 check "install adds one tagged line and keeps user content" \
-  '[ "$(grep -c "bunk:managed" "$T/init.lua")" = 1 ] && head -2 "$T/init.lua" | cmp -s - "$T/init.orig"'
+  '[ "$(grep -c "momento-rex:managed" "$T/init.lua")" = 1 ] && head -2 "$T/init.lua" | cmp -s - "$T/init.orig"'
 B install --no-start >/dev/null
-check "install twice changes nothing" '[ "$(grep -c "bunk:managed" "$T/init.lua")" = 1 ]'
+check "install twice changes nothing" '[ "$(grep -c "momento-rex:managed" "$T/init.lua")" = 1 ]'
 
 echo "watcher"
 start_server
 check "init.lua starts one watcher" 'wait_for 10 started'
 R config reload >/dev/null 2>&1
 check "after a config reload, one watcher is left" 'sleep 1; wait_for 10 watchers_are 1' "$(pgrep -fl "state_dir=$STATE")"
-check "the new watcher takes over once the old one has exited" 'wait_for 10 took_over' "$(tail -5 "$STATE/bunk.log")"
+check "the new watcher takes over once the old one has exited" 'wait_for 10 took_over' "$(tail -5 "$STATE/momento-rex.log")"
 
 echo "saving"
 read -r SA BA < <(pane a "$T/work")
@@ -126,7 +126,7 @@ check "codex: record saved after the first message" 'wait_for 10 has_chat $BB'
 ID_B="$(recf "$BB" chat_id)"
 
 # Claude cuts project folder names over 200 characters and adds a hash, so
-# bunk can't work out the folder from the cwd and has to search by chat id.
+# momento-rex can't work out the folder from the cwd and has to search by chat id.
 LONG="$T/work/$(printf 'a-folder-name-long-enough-to-be-cut-%02d/' 1 2 3 4 5 6)end"
 mkdir -p "$LONG"
 read -r SG BG < <(pane g "$LONG")
@@ -134,7 +134,7 @@ sleep 1
 type_in "$SG" "$BG" claude
 sleep 1
 type_in "$SG" "$BG" hello
-check "claude in a long folder: record saved" 'wait_for 10 has_chat $BG' "$(ls "$T/claude/projects"; tail -5 "$STATE/bunk.log")"
+check "claude in a long folder: record saved" 'wait_for 10 has_chat $BG' "$(ls "$T/claude/projects"; tail -5 "$STATE/momento-rex.log")"
 check "claude in a long folder: its transcript is under a cut, hashed name" \
   '[ -n "$(ls "$T/claude/projects" | awk "length > 200")" ]' "$(ls "$T/claude/projects")"
 type_in "$SG" "$BG" /exit
@@ -156,12 +156,12 @@ echo "restart"
 stop_server
 check "records survive the server stopping" '[ -f "$(rec "$BA")" ] && [ -f "$(rec "$BB")" ]'
 check "the watcher exits with the server" 'wait_for 10 watchers_are 0'
-# With the test server gone, bunk must not fall back to the user's Rex.
+# With the test server gone, momento-rex must not fall back to the user's Rex.
 check "status with Rex down says so, and doesn't reach another server" \
   'out="$(B status 2>&1)"; [ $? = 4 ] && printf "%s" "$out" | grep -q "Rex isn.t running"' "$(B status 2>&1)"
 : > "$T/launches"
 start_server
-check "claude resumes in the restored pane" 'wait_for 15 launched "claude resumed $ID_A"' "$(cat "$T/launches"; tail -5 "$STATE/bunk.log")"
+check "claude resumes in the restored pane" 'wait_for 15 launched "claude resumed $ID_A"' "$(cat "$T/launches"; tail -5 "$STATE/momento-rex.log")"
 check "codex resumes, cd'd into its folder" 'wait_for 15 launched "codex resumed $ID_B cwd=$CWD_B"' "$(cat "$T/launches")"
 check "the resumed claude keeps the user's alias" '[ "$(launches "claude resumed $ID_A cwd=$T/work alias=1")" = 1 ]'
 sleep 4
@@ -205,9 +205,9 @@ check "claude resumes in pane f" 'wait_for 15 launched "claude resumed $ID_F"' "
 R send-key -s "$SF" -b "$BF" ctrl+z >/dev/null
 rm -f "$T/claude/slow-session"
 # RESUME_GRACE (15 s) + EXIT_CONFIRM (2 s) + a pass: before the fix, the
-# record was forgotten here because bunk never saw the resumed claude in front.
+# record was forgotten here because momento-rex never saw the resumed claude in front.
 sleep 20
-check "a resumed chat suspended before bunk saw it keeps its record" 'chat_is $BF $ID_F resuming || chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1; tail -5 "$STATE/bunk.log")"
+check "a resumed chat suspended before momento-rex saw it keeps its record" 'chat_is $BF $ID_F resuming || chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1; tail -5 "$STATE/momento-rex.log")"
 type_in "$SF" "$BF" fg
 check "back in front, it is saved as live" 'wait_for 10 chat_is $BF $ID_F live' "$(cat "$(rec "$BF")" 2>&1)"
 

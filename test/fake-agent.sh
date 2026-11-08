@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stands in for claude and codex, imitating the private files bunk reads:
+# Stands in for claude and codex, imitating the private files momento-rex reads:
 #   claude: writes $CLAUDE_CONFIG_DIR/sessions/<pid>.json at start, rewrites
 #           sessionId on /clear, deletes the file on exit and on SIGHUP.
 #           With $CLAUDE_CONFIG_DIR/slow-session present, it waits 4 s first.

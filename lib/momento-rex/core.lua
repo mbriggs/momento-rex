@@ -1,4 +1,4 @@
--- bunk core: pure decisions and parsers. No rex, io, or os calls, so it runs
+-- momento-rex core: pure decisions and parsers. No rex, io, or os calls, so it runs
 -- under plain luajit in test/unit.lua as well as inside `rex do`.
 
 local M = {}
@@ -102,7 +102,7 @@ end
 
 -- `lsof -Fn` output for a Codex process. Returns {id = ...} for the newest
 -- open rollout, nil when none is open, and a problem string when a .jsonl
--- under sessions/ is open but isn't named the way bunk expects.
+-- under sessions/ is open but isn't named the way momento-rex expects.
 function M.codex_chat_from_lsof(text, codex_home)
   local prefix = codex_home .. "/sessions/"
   local best, bestname, odd

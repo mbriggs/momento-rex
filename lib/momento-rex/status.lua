@@ -1,4 +1,4 @@
--- bunk status: rex --autostart=false do status.lua state_dir=DIR config=FILE
+-- momento-rex status: rex --autostart=false do status.lua state_dir=DIR config=FILE
 -- Prints the watcher's health, saved chats, and problems. Exits 1 when
 -- anything needs attention.
 
@@ -37,7 +37,7 @@ local st = decode(read(STATE .. "/status.json"))
 local token = (read(STATE .. "/watcher.token") or ""):gsub("%s+", "")
 if not st then
   say("watcher   not running (no status yet in ", short(STATE), ")")
-  bad[#bad + 1] = "start the watcher: bunk start"
+  bad[#bad + 1] = "start the watcher: momento-rex start"
 elseif token ~= st.token then
   say("watcher   stopped (token changed: ", token == "uninstalled" and "uninstalled" or "a newer watcher has not written status yet", ")")
   bad[#bad + 1] = "watcher not running"
@@ -46,19 +46,19 @@ else
   local limit = 3 * (st.period or 3) + 5
   say("watcher   ", age <= limit and "running" or "STALE", ", v", st.version or "?",
     ", last pass ", age, "s ago", st.complete == false and " (incomplete)" or "")
-  if age > limit then bad[#bad + 1] = "watcher has not run a pass in " .. age .. "s: bunk start" end
+  if age > limit then bad[#bad + 1] = "watcher has not run a pass in " .. age .. "s: momento-rex start" end
   if st.version ~= core.VERSION then
-    bad[#bad + 1] = "watcher is v" .. tostring(st.version) .. ", bunk is v" .. core.VERSION .. ": bunk start"
+    bad[#bad + 1] = "watcher is v" .. tostring(st.version) .. ", momento-rex is v" .. core.VERSION .. ": momento-rex start"
   end
 end
 
 local cfg = args.config
 local text = cfg and read(cfg) or ""
-if text:find("-- bunk:managed", 1, true) then
+if text:find("-- momento-rex:managed", 1, true) then
   say("init.lua  set up (", short(cfg), ")")
 else
   say("init.lua  NOT set up (", short(cfg), ")")
-  bad[#bad + 1] = "run: bunk install"
+  bad[#bad + 1] = "run: momento-rex install"
 end
 
 local r = rex.exec({ "ls", STATE .. "/panes" })
@@ -83,6 +83,6 @@ end
 if #bad > 0 then
   say("problems")
   for _, b in ipairs(bad) do say("  ", b) end
-  say("log       ", short(STATE .. "/bunk.log"))
+  say("log       ", short(STATE .. "/momento-rex.log"))
   rex.stop(1)
 end

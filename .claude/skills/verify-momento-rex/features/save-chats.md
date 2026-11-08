@@ -1,6 +1,6 @@
 # Saving chats
 
-While Rex runs, the watcher keeps one record per pane that has Claude Code or Codex in front. It writes `$BUNK_STATE_DIR/panes/<block>.json` with the agent, chat ID, folder, and shell identity. It forgets the chat when the agent exits and keeps it when the agent is suspended.
+While Rex runs, the watcher keeps one record per pane that has Claude Code or Codex in front. It writes `$MOMENTO_REX_STATE_DIR/panes/<block>.json` with the agent, chat ID, folder, and shell identity. It forgets the chat when the agent exits and keeps it when the agent is suspended.
 
 ## Sub-features
 
@@ -35,5 +35,5 @@ Preconditions:
 ## Gotchas
 
 - Exit is confirmed on a second look, so a record can survive up to two passes (about 2 seconds in the sandbox, 6 by default) after `/exit`.
-- Garbage collection waits `BUNK_GC_AFTER` seconds. The sandbox sets it to 6, and the default is 30.
+- Garbage collection waits `MOMENTO_REX_GC_AFTER` seconds. The sandbox sets it to 6, and the default is 30.
 - The record file name is the block ID with `:` replaced by `_`.

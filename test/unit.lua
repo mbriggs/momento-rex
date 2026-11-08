@@ -1,6 +1,6 @@
--- Unit tests for lib/bunk/core.lua. Run: luajit test/unit.lua
+-- Unit tests for lib/momento-rex/core.lua. Run: luajit test/unit.lua
 local root = arg[0]:match("^(.*)/test/[^/]*$") or "."
-package.path = root .. "/lib/bunk/?.lua;" .. package.path
+package.path = root .. "/lib/momento-rex/?.lua;" .. package.path
 local core = require("core")
 
 local pass, fail = 0, 0

@@ -1,11 +1,11 @@
 #!/bin/sh
 # bin/worktree: provision, describe, land, and tear down worktree lanes.
 #
-# A lane is one linked git worktree. bunk has no ports, databases, caches, or
+# A lane is one linked git worktree. momento-rex has no ports, databases, caches, or
 # build outputs, and `make test` makes its own temp dir and Rex server per run,
 # so a lane isolates nothing beyond its checkout. The lane index names its
 # registry entry. What a lane must not do is reach the user's real Rex, and
-# bin/bunk calls `guard` for that.
+# bin/momento-rex calls `guard` for that.
 #
 # POSIX sh plus perl's flock, because the Claude hooks run this before
 # anything else and macOS has no flock(1).
@@ -85,7 +85,7 @@ do_setup() {
   fi
   n="$(with_lock "$REG/.lock" "$SELF" __allocate)" || die "couldn't allocate a lane"
   [ -n "$n" ] || die "couldn't allocate a lane"
-  # bunk lanes own no resources, so there is nothing to create here.
+  # momento-rex lanes own no resources, so there is nothing to create here.
   tmp="$ROOT/worktree.env.tmp.$$"
   {
     say "WORKTREE_LANE=$n"
@@ -231,7 +231,7 @@ sync_main() {
   ahead="$(git -C "$PRIMARY" rev-list --count origin/main..main)"
   [ "$ahead" = 0 ] || { say "worktree: main has $ahead commit(s) that origin/main lacks; those need a PR" >&2; return 1; }
   git -C "$PRIMARY" merge -q --ff-only origin/main || return 1
-  # bunk has no database, so there is nothing to migrate.
+  # momento-rex has no database, so there is nothing to migrate.
   say "main is at origin/main ($(git -C "$PRIMARY" rev-parse --short HEAD))"
 }
 
@@ -245,8 +245,8 @@ cmd_sync() {
 cmd_info() {
   if ! is_lane; then
     say "checkout  $ROOT (primary)"
-    say "lane      none; the primary keeps bunk's defaults"
-    say "real Rex  bin/bunk install, uninstall, and start run here"
+    say "lane      none; the primary keeps momento-rex's defaults"
+    say "real Rex  bin/momento-rex install, uninstall, and start run here"
     return 0
   fi
   [ -f "$ROOT/worktree.env" ] || die "$ROOT is not provisioned; run bin/worktree setup"
@@ -256,9 +256,9 @@ cmd_info() {
   say "branch    $(g symbolic-ref --short -q HEAD || echo '(detached)')"
   say "lane      $lane"
   say "primary   $PRIMARY"
-  say "isolated  nothing to isolate: bunk has no ports or databases, and make test makes its own temp dir and Rex server"
-  say "refused   bin/bunk start, bin/bunk install without --no-start, and install or uninstall against the real"
-  say "          init.lua or ~/.local/state/bunk (exit 3). Ask the user to run those in the primary."
+  say "isolated  nothing to isolate: momento-rex has no ports or databases, and make test makes its own temp dir and Rex server"
+  say "refused   bin/momento-rex start, bin/momento-rex install without --no-start, and install or uninstall against the real"
+  say "          init.lua or ~/.local/state/momento-rex (exit 3). Ask the user to run those in the primary."
 }
 
 # Checks the checkout that holds this file, not the working directory, so a
