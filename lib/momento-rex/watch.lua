@@ -18,7 +18,8 @@ local PERIOD = tonumber(args.period or os.getenv("MOMENTO_REX_PERIOD")) or 3
 local GC_AFTER = tonumber(args.gc_after or os.getenv("MOMENTO_REX_GC_AFTER")) or 30
 
 local function now() return os.time() end
-local function trim(s) return (s or ""):gsub("^%s+", ""):gsub("%s+$", "") end
+-- One value: gsub's count would go to tonumber as a base and make it nil.
+local function trim(s) return ((s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
 
 local function read(path)
   local f = io.open(path, "r")
@@ -30,6 +31,7 @@ end
 
 local function write_atomic(path, s)
   local tmp = path .. ".tmp"
+  os.remove(tmp) -- io.open would follow a symlink planted at the tmp name
   local f = io.open(tmp, "w")
   if not f then return false end
   f:write(s)
@@ -40,7 +42,9 @@ end
 local function log(...)
   local f = io.open(STATE .. "/momento-rex.log", "a")
   if not f then return end
-  f:write(os.date("!%Y-%m-%dT%H:%M:%SZ "), table.concat({ ... }, " "), "\n")
+  -- Paths and details come from other programs: no newlines or escapes.
+  local line = table.concat({ ... }, " "):gsub("[%z\1-\31\127]", "?")
+  f:write(os.date("!%Y-%m-%dT%H:%M:%SZ "), line, "\n")
   f:close()
 end
 
@@ -56,7 +60,14 @@ end
 rex.on("terminal.process_changed", function() end)
 
 rex.exec({ "mkdir", "-p", PANES })
-rex.exec({ "chmod", "700", STATE })
+-- chmod fails on a directory someone else owns. Records name your folders and
+-- the token decides which watcher runs, so refuse a state dir that isn't ours.
+local chmod = rex.exec({ "chmod", "700", STATE })
+if not (chmod and chmod.ok) then
+  io.stderr:write("momento-rex: can't make ", STATE, " private; not starting\n")
+  rex.stop(1)
+  return
+end
 do -- keep the log under 1 MB
   local f = io.open(STATE .. "/momento-rex.log", "r")
   if f then
@@ -78,16 +89,33 @@ local token = trim(rex.exec({ "uuidgen" }).stdout)
 if token == "" then token = tostring(os.time()) .. tostring(os.clock()) .. tostring({}) end
 local my_pid = tonumber(trim(rex.exec({ "sh", "-c", "echo $PPID" }).stdout))
 
+-- A process's start time. With the pid, it tells a process apart from a
+-- later one that reuses the pid.
+local function lstart(pid)
+  pid = tonumber(pid)
+  if not pid then return nil end
+  local r = rex.exec({ "ps", "-o", "lstart=", "-p", tostring(pid) }, { env = { LC_ALL = "C" } })
+  local s = r and r.ok and trim(r.stdout) or nil
+  if s == "" then return nil end
+  return s
+end
+
+-- The pid file holds "<pid> <start time>". The start time keeps a reused pid,
+-- say another program's watch.lua, from being waited on or killed. A file
+-- from before the start time was saved holds only the pid.
+local pred_pid, pred_start = trim(read(PID_FILE)):match("^(%d+)%s*(.*)$")
+local predecessor = tonumber(pred_pid)
+
 local function is_watcher(pid)
   if not pid or pid == my_pid then return false end
+  if pred_start ~= "" and lstart(pid) ~= pred_start then return false end
   local r = rex.exec({ "ps", "-ww", "-o", "args=", "-p", tostring(pid) })
   return r and r.ok and r.stdout:find("watch.lua", 1, true) ~= nil
 end
 
 -- The pid file names the latest watcher, waiting or running. Each watcher
 -- waits for the one named before it, which waited for its own predecessor.
-local predecessor = tonumber(trim(read(PID_FILE)))
-write_atomic(PID_FILE, tostring(my_pid or "") .. "\n")
+write_atomic(PID_FILE, tostring(my_pid or "") .. " " .. (lstart(my_pid) or "") .. "\n")
 write_atomic(TOKEN_FILE, token .. "\n")
 log("start", core.VERSION, token)
 do
@@ -141,17 +169,6 @@ end
 local function remove(block_id)
   local p = record_path(block_id)
   if p then os.remove(p) end
-end
-
--- A process's start time. With the pid, it tells a process apart from a
--- later one that reuses the pid.
-local function lstart(pid)
-  pid = tonumber(pid)
-  if not pid then return nil end
-  local r = rex.exec({ "ps", "-o", "lstart=", "-p", tostring(pid) }, { env = { LC_ALL = "C" } })
-  local s = r and r.ok and trim(r.stdout) or nil
-  if s == "" then return nil end
-  return s
 end
 
 -- Problems stay listed in status for an hour after they were last seen.

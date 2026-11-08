@@ -67,6 +67,13 @@ replace() {
   if [ -e "$2" ]; then cat "$1" > "$2"; rm -f "$1"; else mv -f "$1" "$2"; fi
 }
 
+# Copy init.lua to init.lua.momento-rex-backup. The old backup goes first, so a
+# symlink planted at that name can't send the copy somewhere else.
+backup() {
+  rm -f "$CONFIG.momento-rex-backup"
+  cp -p "$CONFIG" "$CONFIG.momento-rex-backup"
+}
+
 start_watcher() {
   rex="$(rex_bin)"
   if ! "$rex" --autostart=false whoami >/dev/null 2>&1; then
@@ -104,7 +111,7 @@ cmd_install() {
       rm -f "$tmp"
       die "the new init.lua didn't pass 'rex config check'; $CONFIG is unchanged"
     fi
-    [ -f "$CONFIG" ] && cp -p "$CONFIG" "$CONFIG.momento-rex-backup"
+    [ -f "$CONFIG" ] && backup
     replace "$tmp" "$CONFIG"
     say "Added one line to $CONFIG (backup: $CONFIG.momento-rex-backup)."
   fi
@@ -116,13 +123,14 @@ cmd_uninstall() {
   if [ -f "$CONFIG" ] && grep -qF -- "$TAG" "$CONFIG"; then
     tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.momento-rex.XXXXXX")"
     grep -vF -- "$TAG" "$CONFIG" > "$tmp" || true
-    cp -p "$CONFIG" "$CONFIG.momento-rex-backup"
+    backup
     replace "$tmp" "$CONFIG"
     say "Removed momento-rex's line from $CONFIG."
   else
     say "init.lua has no momento-rex line."
   fi
   if [ -d "$STATE" ]; then
+    rm -f "$STATE/watcher.token"
     printf 'uninstalled\n' > "$STATE/watcher.token"
     say "The watcher stops within a few seconds. Saved chats stay in $STATE."
   fi

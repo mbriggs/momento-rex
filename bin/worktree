@@ -87,6 +87,7 @@ do_setup() {
   [ -n "$n" ] || die "couldn't allocate a lane"
   # momento-rex lanes own no resources, so there is nothing to create here.
   tmp="$ROOT/worktree.env.tmp.$$"
+  rm -f "$tmp"   # a planted symlink here would redirect the write
   {
     say "WORKTREE_LANE=$n"
     say "WORKTREE_PRIMARY=$(shq "$PRIMARY")"
@@ -105,7 +106,7 @@ do_allocate() {
   done
   n=$LO
   while [ "$n" -le "$HI" ]; do
-    if [ ! -e "$REG/$n" ]; then
+    if [ ! -e "$REG/$n" ] && [ ! -L "$REG/$n" ]; then   # -e misses a dangling symlink
       say "$ROOT" > "$REG/$n"
       say "$n"
       return 0
@@ -250,8 +251,8 @@ cmd_info() {
     return 0
   fi
   [ -f "$ROOT/worktree.env" ] || die "$ROOT is not provisioned; run bin/worktree setup"
-  # shellcheck disable=SC1091
-  lane="$(. "$ROOT/worktree.env" && printf '%s' "$WORKTREE_LANE")"
+  # Read, not sourced: a branch can commit a worktree.env of its own.
+  lane="$(sed -n 's/^WORKTREE_LANE=\([0-9][0-9]*\)$/\1/p' "$ROOT/worktree.env")"
   say "checkout  $ROOT"
   say "branch    $(g symbolic-ref --short -q HEAD || echo '(detached)')"
   say "lane      $lane"

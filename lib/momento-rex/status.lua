@@ -31,7 +31,11 @@ local function short(p)
 end
 
 local bad = {}
-local function say(...) print(table.concat({ ... }, "")) end
+-- Folder names and problem details can hold escape sequences; never send
+-- them to the terminal.
+local function say(...)
+  print((table.concat({ ... }, ""):gsub("[%z\1-\31\127]", "?")))
+end
 
 local st = decode(read(STATE .. "/status.json"))
 local token = (read(STATE .. "/watcher.token") or ""):gsub("%s+", "")

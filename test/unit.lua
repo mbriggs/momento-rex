@@ -105,6 +105,10 @@ check("codex before first message saves nothing",
   acts(core.decide(nil, obs({ kind = "codex", agent = { pid = 8, start = "t8" } }), 0)) == "")
 local lc = { agent = "codex", chat_id = ID, cwd = "/a", inc = INC, agent_pid = 8, agent_start = "t8", state = "live" }
 check("codex /new keeps last id", acts(core.decide(lc, obs({ kind = "codex", agent = { pid = 8, start = "t8" }, fg_cwd = "/a" }), 0)) ~= "delete")
+a = core.decide(nil, obs({ kind = "codex", agent = { pid = 8, start = "t8" }, chat = { id = ID }, fg_cwd = "/a\27]52;c;eA==\7" }), 0)
+check("codex folder with an escape isn't saved", acts(a) == "write" and a[1][2].cwd == nil)
+a = core.decide(nil, obs({ kind = "codex", agent = { pid = 8, start = "t8" }, chat = { id = ID }, fg_cwd = "/a" }), 0)
+check("codex plain folder is saved", acts(a) == "write" and a[1][2].cwd == "/a")
 
 check("ctrl-z keeps", acts(core.decide(live, obs({ kind = "shell", at_prompt = true, agent_alive = true }), 0)) == "")
 check("vim inside claude keeps", acts(core.decide(live, obs({ kind = "other", agent_alive = true }), 0)) == "")

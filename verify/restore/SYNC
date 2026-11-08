@@ -1,4 +1,4 @@
 # Files the model was last confirmed to describe. Written by 'check --sync'.
-commit 6be1fe925df42ee25ad023c20ee7bc22f527c11d plus uncommitted changes to the covered files
-sha256 9445b5e3a4c80d037d9fa8fc4c8edfe1ff01d2f35d2265e8df5745ccda02e70a lib/momento-rex/core.lua
-sha256 9cfa89e6fab1bbf20dd6a8b93683af5b9d79ca0f3f2338d0a02f7215851d8026 lib/momento-rex/watch.lua
+commit 5af749316838a0a94d155f3e20119d4ef04ab9b3
+sha256 98933aceb52746d1a08bee2d48d6b9ac83d3ec9ad06719dc70a5ae2c9b83e9b9 lib/momento-rex/core.lua
+sha256 0c90c192e66a5d1f838d76b9b5b85bb4c6c1f9534e652a36ce4ea7513b7d294d lib/momento-rex/watch.lua
