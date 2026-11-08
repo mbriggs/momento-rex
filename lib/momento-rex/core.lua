@@ -170,7 +170,7 @@ function M.decide(rec, o, now)
     if not id then return {} end
     local want = {
       v = 1, agent = o.kind, chat_id = id,
-      cwd = (o.chat and o.chat.cwd) or o.fg_cwd or (rec and rec.cwd),
+      cwd = (o.chat and o.chat.cwd) or (M.valid_cwd(o.fg_cwd) and o.fg_cwd) or (rec and rec.cwd),
       inc = o.inc, agent_pid = o.agent.pid, agent_start = o.agent.start,
       session_id = o.session_id, block_id = o.block_id, state = "live",
     }

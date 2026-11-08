@@ -201,7 +201,7 @@ check "teardown takes a path for a worktree outside .claude/worktrees" '[ "$(rc 
 
 echo "hook"
 HOOK="$ROOT/.claude/hooks/worktree-bash.sh"
-hook() { printf '{"cwd":"%s","tool_name":"Bash"}' "$1" | "$HOOK"; }
+hook() { printf '{"cwd":"%s","tool_name":"Bash"}' "$1" | CLAUDE_PROJECT_DIR="$P" "$HOOK"; }
 lane g
 check "the hook does nothing in the primary" '[ "$(rc hook "$P")" = 0 ] && [ ! -s "$T/out" ]'
 check "the hook provisions a new lane and reports it" '[ "$(rc hook "$(L g)")" = 0 ] && [ -f "$(L g)/worktree.env" ] && grep -q additionalContext "$T/out" && grep -q "Provisioned" "$T/out"'
@@ -211,6 +211,24 @@ check "a failed setup blocks one command and leaves the marker" '[ "$(rc hook "$
 check "the next command runs" '[ "$(rc hook "$(L h)")" = 0 ]'
 chmod 755 "$P/tmp/worktrees"
 check "a fixed setup clears the marker" '(cd "$(L h)" && bin/worktree setup >/dev/null) && [ ! -e "$(L h)/tmp/worktree-setup.failed" ]'
+
+# Another repo's linked worktree that ships a bin/worktree: the hook must not run it.
+X="$T/foreign"
+git init -q -b main "$X" && mkdir -p "$X/bin"
+printf '#!/bin/sh\ntouch %s/foreign-ran\n' "$T" > "$X/bin/worktree" && chmod +x "$X/bin/worktree"
+git -C "$X" add -A && git -C "$X" commit -q -m init && git -C "$X" worktree add -q -b fw "$T/foreign-wt"
+check "the hook ignores another repo's worktree" '[ "$(rc hook "$T/foreign-wt")" = 0 ] && [ ! -e "$T/foreign-ran" ]'
+
+echo "env hook"
+ENVHOOK="$ROOT/.claude/hooks/worktree-env.sh"
+EF="$T/claude-env"
+: > "$EF"; echo '{}' | CLAUDE_ENV_FILE="$EF" CLAUDE_PROJECT_DIR="$P" "$ENVHOOK"
+envrun() { (cd "$1" && env -i HOME="$HOME" PATH="$PATH" sh -c '. "$1"; printf "%s|%s" "${WORKTREE_LANE:-}" "${WORKTREE_PRIMARY:-}"' sh "$EF"); }
+check "the env line loads a lane's values" '[ "$(envrun "$(L g)")" = "$(lane_of "$(L g)")|$P" ]'
+printf 'WORKTREE_LANE=91\ntouch %s/env-ran\n' "$T" > "$T/foreign-wt/worktree.env"
+check "the env line ignores another repo's worktree" '[ "$(envrun "$T/foreign-wt")" = "|" ] && [ ! -e "$T/env-ran" ]'
+printf 'WORKTREE_LANE=91\ntouch %s/env-ran\n' "$T" > "$(L h)/worktree.env"
+check "the env line reads worktree.env without running it" '[ "$(envrun "$(L h)")" = "91|$P" ] && [ ! -e "$T/env-ran" ]'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]
