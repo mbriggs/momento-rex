@@ -279,11 +279,13 @@ cmd_guard() {
       ;;
     --confirm)
       branch="$(g symbolic-ref --short -q HEAD || echo HEAD)"
-      if ! { : </dev/tty; } 2>/dev/null; then
+      # Writing the prompt is the terminal check. /dev/tty can open and still
+      # fail every write (EIO on GitHub's Ubuntu runners), and set -e
+      # would turn that failure into exit 2 rather than a refusal.
+      if ! { printf '%s runs from the lane at %s. Type the branch name (%s) to go on: ' "$action" "$ROOT" "$branch" >/dev/tty; } 2>/dev/null; then
         say "worktree: $action needs confirmation on a terminal and there is none; refusing. Run it from the primary checkout: $PRIMARY" >&2
         exit 3
       fi
-      printf '%s runs from the lane at %s. Type the branch name (%s) to go on: ' "$action" "$ROOT" "$branch" >/dev/tty
       read -r answer </dev/tty || answer=""
       [ "$answer" = "$branch" ] || { say "worktree: $action refused" >&2; exit 3; }
       ;;
