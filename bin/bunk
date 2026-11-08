@@ -10,17 +10,7 @@ VERSION=0.1.0
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
-# Find lib/bunk next to the real file, but prefer Homebrew's stable opt path
-# over the versioned Cellar path, since the path is written into init.lua.
-self="$0"
-while [ -L "$self" ]; do
-  link="$(readlink "$self")"
-  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
-done
-ROOT="$(cd "$(dirname "$self")/.." && pwd -P)"
-case "$ROOT" in
-  */Cellar/bunk/*) opt="${ROOT%%/Cellar/bunk/*}/opt/bunk"; [ -d "$opt" ] && ROOT="$opt" ;;
-esac
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$ROOT/lib/bunk"
 [ -f "$LIB/watch.lua" ] || die "can't find $LIB/watch.lua"
 

@@ -74,8 +74,6 @@ check("claude file ok", (core.claude_chat({ pid = 5, sessionId = ID, kind = "int
 check("claude pid mismatch", core.claude_chat({ pid = 6, sessionId = ID, kind = "interactive" }, 5) == nil)
 check("claude not interactive", core.claude_chat({ pid = 5, sessionId = ID, kind = "print" }, 5) == nil)
 check("claude renamed key", core.claude_chat({ pid = 5, session_id = ID }, 5) == nil)
-check("claude slug, dot folder", core.claude_slug("/Users/matt/dots/.config/claude") == "-Users-matt-dots--config-claude")
-check("claude slug, email folder", core.claude_slug("/My-Drive/matt@x.net") == "-My-Drive-matt-x-net")
 local H = "/Users/a/.codex"
 local lsof = "p1\nfcwd\nn/Users/a/src\nn" .. H .. "/state_5.sqlite\nn" .. H ..
   "/sessions/2026/11/08/rollout-2026-11-08T08-23-35-" .. ID .. ".jsonl\nn" .. H ..

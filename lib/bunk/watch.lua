@@ -51,19 +51,9 @@ local function decode(s)
   return nil
 end
 
--- Register a handler before any session call: until one exists, session
--- calls fail with "stream is not attached".
-local pending = {}
-local flush_scheduled = false
-local step, flush
-rex.on("terminal.process_changed", function(ctx)
-  if not ctx.block_id then return end
-  pending[ctx.block_id] = ctx.session_id
-  if not flush_scheduled then
-    flush_scheduled = true
-    rex.after(0.3, function() flush() end)
-  end
-end)
+-- Session calls return nil until the script has an event handler, so
+-- register one that does nothing. The watcher only polls.
+rex.on("terminal.process_changed", function() end)
 
 rex.exec({ "mkdir", "-p", PANES })
 rex.exec({ "chmod", "700", STATE })
@@ -77,11 +67,11 @@ do -- keep the log under 1 MB
 end
 
 -- Newest watcher wins: a config reload or `bunk start` starts another one,
--- and the older one stops at its next event or tick. Uninstall overwrites
--- the token too. The new watcher takes no step until the one it replaces
--- has exited, so two watchers never act at once: one could otherwise
--- overwrite a record the other just saved, or write "resuming" and stop
--- before typing (verify/restore, finding F3).
+-- and the older one stops at its next tick. Uninstall overwrites the token
+-- too. The new watcher takes no step until the one it replaces has exited,
+-- so two watchers never act at once: one could otherwise overwrite a record
+-- the other just saved, or write "resuming" and stop before typing
+-- (verify/restore, finding F3).
 local TOKEN_FILE = STATE .. "/watcher.token"
 local PID_FILE = STATE .. "/watcher.pid"
 local token = trim(rex.exec({ "uuidgen" }).stdout)
@@ -153,20 +143,14 @@ local function remove(block_id)
   if p then os.remove(p) end
 end
 
--- Pids and chat ids used since the last complete pass. The caches below are
--- trimmed to these after each one, so they don't grow with every process.
-local touched = {}
-
-local start_cache = {}
-local function lstart(pid, fresh)
+-- A process's start time. With the pid, it tells a process apart from a
+-- later one that reuses the pid.
+local function lstart(pid)
   pid = tonumber(pid)
   if not pid then return nil end
-  touched[pid] = true
-  if not fresh and start_cache[pid] then return start_cache[pid] end
   local r = rex.exec({ "ps", "-o", "lstart=", "-p", tostring(pid) }, { env = { LC_ALL = "C" } })
   local s = r and r.ok and trim(r.stdout) or nil
-  if s == "" then s = nil end
-  start_cache[pid] = s
+  if s == "" then return nil end
   return s
 end
 
@@ -178,48 +162,46 @@ local function problem(block_id, code, detail)
   problems[key] = { code = code, block_id = block_id, detail = detail, last_seen = os.time() }
 end
 
--- Has this Claude chat got a transcript yet? Look in the folder's project
--- directory, and search all projects (at most every 10s per chat) only when
--- that directory doesn't exist. Found transcripts are remembered.
-local transcript_seen, transcript_searched = {}, {}
-local function has_transcript(chat)
-  touched[chat.id] = true
-  if transcript_seen[chat.id] then return true end
-  local projects = CLAUDE_DIR .. "/projects"
-  if chat.cwd then
-    local d = projects .. "/" .. core.claude_slug(chat.cwd)
-    if read(d .. "/" .. chat.id .. ".jsonl") then
-      transcript_seen[chat.id] = true
-      return true
-    end
-    if rex.exec({ "test", "-d", d }).ok then return false end
-  end
-  if now() - (transcript_searched[chat.id] or 0) < 10 then return false end
-  transcript_searched[chat.id] = now()
-  local r = rex.exec({ "find", projects, "-maxdepth", "2", "-name", chat.id .. ".jsonl", "-print", "-quit" })
-  if r and r.ok and trim(r.stdout) ~= "" then
-    transcript_seen[chat.id] = true
-    return true
-  end
-  return false
+-- Has this Claude chat got a transcript (projects/<folder>/<id>.jsonl) yet?
+-- Claude names the folder after the cwd but shortens long names and adds a
+-- hash, so search every project for the chat id instead of guessing it.
+local function has_transcript(chat_id)
+  local r = rex.exec({ "find", CLAUDE_DIR .. "/projects", "-maxdepth", "2",
+    "-name", chat_id .. ".jsonl", "-print", "-quit" })
+  return r ~= nil and r.ok and trim(r.stdout) ~= ""
 end
 
-local agent_first_seen = {}
+-- Per pane: the Claude pid bunk couldn't read a sessions file for, and when
+-- that started. Reset when the pane's agent changes.
+local unreadable = {}
+-- Per pane: the chat id whose transcript was found, so each chat is searched
+-- for only until its first message.
+local transcript_found = {}
+
 local function find_chat(kind, pid, block_id)
   if kind == "claude" then
-    touched[pid] = true
     local path = CLAUDE_DIR .. "/sessions/" .. pid .. ".json"
     local text = read(path)
     local chat, why = core.claude_chat(decode(text), pid)
     if chat then
-      -- A chat with no messages can't be resumed, so it isn't saved yet.
-      return has_transcript(chat) and chat or nil
+      unreadable[block_id] = nil
+      -- A chat with no messages can't be resumed, so it isn't saved until
+      -- its transcript exists.
+      if transcript_found[block_id] ~= chat.id then
+        if not has_transcript(chat.id) then return nil end
+        transcript_found[block_id] = chat.id
+      end
+      return chat
     end
     -- Claude writes no file while it asks whether to trust a folder, so a
     -- missing file is only a problem after a while. A file bunk can't read
     -- is one sooner.
-    agent_first_seen[pid] = agent_first_seen[pid] or now()
-    if now() - agent_first_seen[pid] > (text and 10 or 120) then
+    local u = unreadable[block_id]
+    if not u or u.pid ~= pid then
+      u = { pid = pid, since = now() }
+      unreadable[block_id] = u
+    end
+    if now() - u.since > (text and 10 or 120) then
       problem(block_id, "claude.sessions", (text and why or "missing") .. ": " .. path)
     end
     return nil
@@ -287,13 +269,13 @@ end
 
 local exit_seen = {}
 
-function step(session_id, block_id)
+local function step(session_id, block_id)
   local o = observe(session_id, block_id)
   if not o.ok then return false end
   local rec = load(block_id)
   if rec and o.kind ~= "claude" and o.kind ~= "codex" then pane_agent(o, rec) end
   if rec and rec.agent_pid then
-    o.agent_alive = rec.agent_start ~= nil and lstart(rec.agent_pid, true) == rec.agent_start
+    o.agent_alive = rec.agent_start ~= nil and lstart(rec.agent_pid) == rec.agent_start
   end
   o.exit_seen = exit_seen[block_id]
   local marked = false
@@ -328,16 +310,6 @@ function step(session_id, block_id)
   end
   if not marked then exit_seen[block_id] = nil end
   return true
-end
-
-function flush()
-  flush_scheduled = false
-  local batch = pending
-  pending = {}
-  if guard() then
-    for block_id, session_id in pairs(batch) do pcall(step, session_id, block_id) end
-  end
-  if stopping then rex.stop(0) end
 end
 
 local missing = {}
@@ -406,11 +378,9 @@ local function full_pass()
     end
   end
   if complete then
-    for _, t in ipairs({ start_cache, agent_first_seen, transcript_seen, transcript_searched }) do
-      for k in pairs(t) do if not touched[k] then t[k] = nil end end
+    for _, t in ipairs({ exit_seen, unreadable, transcript_found }) do
+      for k in pairs(t) do if not seen[k] then t[k] = nil end end
     end
-    for k in pairs(exit_seen) do if not seen[k] then exit_seen[k] = nil end end
-    touched = {}
   end
   write_status(complete, panes)
 end

@@ -24,11 +24,11 @@ Look up the coverage table. If a changed function is in it, run the check. If yo
 | `core.decide` (`lib/bunk/core.lua`) | `Decide` | `conform.lua` runs the real function on 86,184 inputs and compares. Mechanical. |
 | `core.resume_line` | the `type` action | conformance checks that the typed bytes equal `resume_line(rec, cwd)`. Its validation is in `test/unit.lua`, not here. |
 | `core.EXIT_CONFIRM`, `core.RESUME_GRACE` | constants | the conformance table runs at the real values, 2 and 15 |
-| `step` in `lib/bunk/watch.lua`: `observe`, then `load`, `pane_agent` (when there's a record and no agent in front), `lstart(rec.agent_pid, true)`, then one `guard()` before the first action, then `exit_seen` cleared unless marked | `Observe`, `Load`, `Guard`, `Do`, `Finish` | by reading. Each model step is one stretch of code with no wait in it. |
+| `step` in `lib/bunk/watch.lua`: `observe`, then `load`, `pane_agent` (when there's a record and no agent in front), `lstart(rec.agent_pid)` (never cached), then one `guard()` before the first action, then `exit_seen` cleared unless marked | `Observe`, `Load`, `Guard`, `Do`, `Finish` | by reading. Each model step is one stretch of code with no wait in it. |
 | `still_at_prompt` before each `type`; if it fails, the loaded record is saved back | `Recheck`, `Type` | by reading |
 | `observe` and `find_chat`: `at_prompt` means `#ancestors <= 1`, and a Claude chat counts only with `sessions/<pid>.json` and a transcript. `pane_agent` finds an agent among the pane shell's children (`core.pane_shell`, `core.child_agent`). | `Observed`, `BackgroundObs` | by reading; the two core helpers have unit tests |
 | watcher startup: read `watcher.pid`, write our pid and `watcher.token`, wait for the named watcher to exit (kill it after 15 s), then stop if the token isn't ours | `StartWatcher`, `Wait` | by reading |
-| `guard()` at the top of `flush` and `full_pass` | `StopIdle` | by reading |
+| `guard()` at the top of `full_pass` | `StopIdle` | by reading |
 | `bin/bunk start_watcher`, `install` (always starts another watcher), config reload | `StartWatcher` with `Handoff = TRUE` | by reading |
 | Rex runs one script's handlers one at a time, and nothing runs during `rex.sleep` (`rex do --help`) | watcher steps of one watcher never interleave | an assumption about Rex |
 
