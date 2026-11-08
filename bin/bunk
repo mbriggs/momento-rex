@@ -1,0 +1,176 @@
+#!/bin/sh
+# bunk: bring Claude Code and Codex chats back after Rex restarts.
+# POSIX sh on purpose: install and uninstall must work when Rex isn't running
+# (`rex do` refuses to run without a server).
+set -eu
+
+PROG=bunk
+VERSION=0.1.0
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
+
+# Find lib/bunk next to the real file, but prefer Homebrew's stable opt path
+# over the versioned Cellar path, since the path is written into init.lua.
+self="$0"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+ROOT="$(cd "$(dirname "$self")/.." && pwd -P)"
+case "$ROOT" in
+  */Cellar/bunk/*) opt="${ROOT%%/Cellar/bunk/*}/opt/bunk"; [ -d "$opt" ] && ROOT="$opt" ;;
+esac
+LIB="$ROOT/lib/bunk"
+[ -f "$LIB/watch.lua" ] || die "can't find $LIB/watch.lua"
+
+STATE="${BUNK_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/bunk}"
+CONFIG="${REX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/rex/init.lua}"
+TAG="-- bunk:managed"
+
+# In a worktree lane (a checkout whose .git is a file), refuse whatever
+# reaches the user's real Rex: the real init.lua, the real state dir, or a
+# watcher on the running server. The e2e test points REX_CONFIG and
+# BUNK_STATE_DIR at a temp dir and never starts a watcher, so it passes.
+# Homebrew installs have no .git and skip this.
+abspath() {
+  d="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || d="$(dirname "$1")"
+  printf '%s/%s\n' "$d" "$(basename "$1")"
+}
+touches_real_files() {
+  c="$(abspath "$CONFIG")" s="$(abspath "$STATE")"
+  for real in "${XDG_CONFIG_HOME:-$HOME/.config}/rex/init.lua" "$HOME/.config/rex/init.lua"; do
+    [ "$c" = "$(abspath "$real")" ] && return 0
+  done
+  for real in "${XDG_STATE_HOME:-$HOME/.local/state}/bunk" "$HOME/.local/state/bunk"; do
+    [ "$s" = "$(abspath "$real")" ] && return 0
+  done
+  return 1
+}
+lane_deny() {
+  [ -f "$ROOT/.git" ] || return 0
+  "$ROOT/bin/worktree" guard --deny "bin/bunk $1" || exit $?
+}
+
+rex_bin() {
+  if [ -n "${REX_BIN_DIR:-}" ] && [ -x "$REX_BIN_DIR/rex" ]; then
+    printf '%s\n' "$REX_BIN_DIR/rex"
+  else
+    command -v rex || die "rex is not on PATH"
+  fi
+}
+
+# A Lua string literal. Paths with a newline or carriage return are refused.
+luaq() {
+  case "$1" in *'
+'*|*"$(printf '\r')"*) die "path contains a line break: $1" ;; esac
+  printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+init_line() {
+  printf 'if not os.getenv("BUNK_NO_START") then local d = os.getenv("REX_BIN_DIR"); pcall(rex.exec.start, {d and (d .. "/rex") or %s, "--autostart=false", "do", %s, "--all", %s}, {detach = true, stdout = false, stderr = false}) end %s\n' \
+    "$(luaq "$(rex_bin)")" "$(luaq "$LIB/watch.lua")" "$(luaq "state_dir=$STATE")" "$TAG"
+}
+
+# Write $1's contents over $2, keeping $2's symlink and permissions.
+replace() {
+  if [ -e "$2" ]; then cat "$1" > "$2"; rm -f "$1"; else mv -f "$1" "$2"; fi
+}
+
+start_watcher() {
+  rex="$(rex_bin)"
+  if ! "$rex" --autostart=false whoami >/dev/null 2>&1; then
+    say "Rex isn't running; the watcher starts with it."
+    return 0
+  fi
+  mkdir -p "$STATE"
+  # No session or pane: the watcher hears every session.
+  nohup env -u REX_SESSION -u REX_BLOCK "$rex" --autostart=false do "$LIB/watch.lua" --all "state_dir=$STATE" \
+    >/dev/null 2>&1 </dev/null &
+  say "Started the watcher."
+}
+
+cmd_install() {
+  no_start=0
+  for a in "$@"; do
+    case "$a" in
+      --no-start) no_start=1 ;;
+      *) die "unknown option: $a" ;;
+    esac
+  done
+  [ "$no_start" = 1 ] || lane_deny "install (starts a watcher on your real Rex server)"
+  ! touches_real_files || lane_deny "install (writes your real init.lua)"
+  mkdir -p "$(dirname "$CONFIG")"
+  tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.bunk.XXXXXX")"
+  if [ -f "$CONFIG" ]; then grep -vF -- "$TAG" "$CONFIG" > "$tmp" || true; fi
+  init_line >> "$tmp"
+  if [ -f "$CONFIG" ] && cmp -s "$tmp" "$CONFIG"; then
+    rm -f "$tmp"
+    say "init.lua is already set up: $CONFIG"
+  else
+    if ! BUNK_NO_START=1 REX_CONFIG="$tmp" "$(rex_bin)" --autostart=false config check >/dev/null 2>&1; then
+      rm -f "$tmp"
+      die "the new init.lua didn't pass 'rex config check'; $CONFIG is unchanged"
+    fi
+    [ -f "$CONFIG" ] && cp -p "$CONFIG" "$CONFIG.bunk-backup"
+    replace "$tmp" "$CONFIG"
+    say "Added one line to $CONFIG (backup: $CONFIG.bunk-backup)."
+  fi
+  [ "$no_start" = 1 ] || start_watcher
+}
+
+cmd_uninstall() {
+  ! touches_real_files || lane_deny "uninstall (writes your real init.lua)"
+  if [ -f "$CONFIG" ] && grep -qF -- "$TAG" "$CONFIG"; then
+    tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.bunk.XXXXXX")"
+    grep -vF -- "$TAG" "$CONFIG" > "$tmp" || true
+    cp -p "$CONFIG" "$CONFIG.bunk-backup"
+    replace "$tmp" "$CONFIG"
+    say "Removed bunk's line from $CONFIG."
+  else
+    say "init.lua has no bunk line."
+  fi
+  if [ -d "$STATE" ]; then
+    printf 'uninstalled\n' > "$STATE/watcher.token"
+    say "The watcher stops within a few seconds. Saved chats stay in $STATE."
+  fi
+}
+
+cmd_status() {
+  set +e
+  env -u REX_SESSION -u REX_BLOCK "$(rex_bin)" --autostart=false do "$LIB/status.lua" --all \
+    "state_dir=$STATE" "config=$CONFIG"
+  rc=$?
+  set -e
+  if [ "$rc" = 4 ]; then
+    say "Rex isn't running."
+    ls "$STATE/panes" 2>/dev/null | sed 's/^/  saved: /'
+  fi
+  exit "$rc"
+}
+
+usage() {
+  cat <<EOF
+$PROG $VERSION: bring Claude Code and Codex chats back after Rex restarts.
+
+  $PROG install [--no-start]   add one line to init.lua and start the watcher
+  $PROG uninstall              remove that line and stop the watcher
+  $PROG status                 is the watcher running, what's saved, any problems
+  $PROG start                  start the watcher now (replaces a running one)
+  $PROG version
+
+Files: $CONFIG (one line), $STATE (records, log)
+EOF
+}
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  install) cmd_install "$@" ;;
+  uninstall) cmd_uninstall ;;
+  status) cmd_status ;;
+  start) lane_deny "start (starts a watcher on your real Rex server)"; start_watcher ;;
+  version|--version) say "$PROG $VERSION" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

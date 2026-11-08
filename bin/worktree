@@ -1,0 +1,295 @@
+#!/bin/sh
+# bin/worktree: provision, describe, land, and tear down worktree lanes.
+#
+# A lane is one linked git worktree. bunk has no ports, databases, caches, or
+# build outputs, and `make test` makes its own temp dir and Rex server per run,
+# so a lane isolates nothing beyond its checkout. The lane index names its
+# registry entry. What a lane must not do is reach the user's real Rex, and
+# bin/bunk calls `guard` for that.
+#
+# POSIX sh plus perl's flock, because the Claude hooks run this before
+# anything else and macOS has no flock(1).
+set -eu
+
+usage() {
+  cat <<'EOF'
+bin/worktree setup                        provision this worktree's lane
+bin/worktree info                         this checkout's lane, branch, and what it refuses
+bin/worktree teardown --stale             drop the lanes whose directory is gone (hooks)
+bin/worktree teardown NAME [--discard]    from the primary: remove a worktree, its branch, and its lane
+bin/worktree land [--message FILE]        from a lane: push and open or update its PR
+bin/worktree sync                         in the primary: fast-forward main to origin/main
+bin/worktree guard --deny|--confirm|--warn ACTION
+EOF
+}
+
+die() { printf 'worktree: %s\n' "$*" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
+
+SELF="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"   # the checkout that holds this file
+common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)" || die "$ROOT is not a git checkout"
+PRIMARY="$(cd "$common/.." && pwd -P)"
+REG="$PRIMARY/tmp/worktrees"                   # one file per lane: tmp/worktrees/<n> holds its path
+
+# Lanes are 0-99. WORKTREE_LANE_RANGE=LO-HI narrows that (the tests use it to
+# stay clear of live lanes). It can never widen it.
+LO=0 HI=99
+if [ -n "${WORKTREE_LANE_RANGE:-}" ]; then
+  lo=${WORKTREE_LANE_RANGE%-*} hi=${WORKTREE_LANE_RANGE#*-}
+  case "$lo$hi" in ''|*[!0-9]*) die "WORKTREE_LANE_RANGE must be LO-HI, got $WORKTREE_LANE_RANGE" ;; esac
+  [ "$lo" -ge 0 ] && [ "$hi" -le 99 ] && [ "$lo" -le "$hi" ] || die "WORKTREE_LANE_RANGE can only narrow 0-99, got $WORKTREE_LANE_RANGE"
+  LO=$lo HI=$hi
+fi
+
+is_lane() { [ -f "$ROOT/.git" ]; }   # only a linked worktree has a .git file
+g() { git -C "$ROOT" "$@"; }
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+tracked_changes() { [ -n "$(git -C "$1" status --porcelain --untracked-files=no)" ]; }
+
+# with_lock FILE CMD...: run CMD holding an exclusive kernel lock on FILE.
+# The kernel drops the lock when the holder dies, so a killed setup never
+# leaves a lock behind. $^F keeps the fd open across exec.
+with_lock() {
+  f=$1; shift
+  mkdir -p "$(dirname "$f")"
+  perl -MFcntl=:flock -e '
+    $^F = 255;
+    my $path = shift;
+    open(my $fh, ">>", $path) or die "worktree: open $path: $!\n";
+    flock($fh, LOCK_EX) or die "worktree: lock $path: $!\n";
+    exec { $ARGV[0] } @ARGV or die "worktree: exec $ARGV[0]: $!\n";
+  ' "$f" "$@"
+}
+
+# ---- setup ---------------------------------------------------------------
+
+cmd_setup() {
+  is_lane || die "this is the primary checkout; setup runs only in a linked worktree"
+  # Parallel Bash calls in a new worktree each fire the hook.
+  with_lock "$ROOT/tmp/worktree-setup.lock" "$SELF" __setup
+}
+
+do_setup() {
+  if [ -f "$ROOT/worktree.env" ]; then
+    say "already provisioned: $ROOT"
+    return 0
+  fi
+  n="$(with_lock "$REG/.lock" "$SELF" __allocate)" || die "couldn't allocate a lane"
+  [ -n "$n" ] || die "couldn't allocate a lane"
+  # bunk lanes own no resources, so there is nothing to create here.
+  tmp="$ROOT/worktree.env.tmp.$$"
+  {
+    say "WORKTREE_LANE=$n"
+    say "WORKTREE_PRIMARY=$(shq "$PRIMARY")"
+  } > "$tmp"
+  mv -f "$tmp" "$ROOT/worktree.env"   # its presence means the lane is provisioned
+  rm -f "$ROOT/tmp/worktree-setup.failed"
+  say "provisioned lane $n for $ROOT"
+}
+
+# Runs under the registry lock. Prints the lane index.
+do_allocate() {
+  sweep_stale >&2
+  for f in "$REG"/*; do
+    [ -f "$f" ] || continue
+    if [ "$(cat "$f")" = "$ROOT" ]; then say "${f##*/}"; return 0; fi
+  done
+  n=$LO
+  while [ "$n" -le "$HI" ]; do
+    if [ ! -e "$REG/$n" ]; then
+      say "$ROOT" > "$REG/$n"
+      say "$n"
+      return 0
+    fi
+    n=$((n + 1))
+  done
+  die "every lane in $LO-$HI is taken; see $REG"
+}
+
+# ---- teardown --------------------------------------------------------------
+
+# Runs under the registry lock. A lane whose directory is gone has no
+# processes to stop and no resources to drop, only its registry entry.
+sweep_stale() {
+  [ -d "$REG" ] || return 0
+  for f in "$REG"/*; do
+    [ -f "$f" ] || continue
+    n=${f##*/}
+    case "$n" in ''|*[!0-9]*) say "skipping $f: not a lane index"; continue ;; esac
+    if [ "$n" -gt 99 ]; then say "skipping $f: lane $n is outside 0-99"; continue; fi
+    [ "$n" -ge "$LO" ] && [ "$n" -le "$HI" ] || continue
+    p="$(cat "$f")"
+    [ -n "$p" ] && [ -d "$p" ] && continue
+    rm -f "$f"
+    say "dropped lane $n ($p is gone)"
+  done
+}
+
+cmd_teardown() {
+  case "${1:-}" in
+    --stale) with_lock "$REG/.lock" "$SELF" __sweep; return ;;
+    ''|-*) usage >&2; exit 2 ;;
+  esac
+  name=$1 discard=0
+  case "${2:-}" in
+    --discard) discard=1 ;;
+    '') ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  is_lane && die "teardown NAME runs from the primary checkout ($PRIMARY). Run from inside the lane, it leaves the directory behind and the next command provisions the lane again."
+
+  case "$name" in
+    */*|.|..) wt="$(cd "$name" 2>/dev/null && pwd -P)" || die "no such directory: $name" ;;
+    *) wt="$PRIMARY/.claude/worktrees/$name" ;;
+  esac
+  [ -f "$wt/.git" ] || die "no linked worktree at $wt"
+  g worktree list --porcelain | grep -qxF "worktree $wt" || die "$wt is not a worktree of $PRIMARY"
+  branch="$(git -C "$wt" symbolic-ref --short -q HEAD || true)"
+  head="$(git -C "$wt" rev-parse HEAD)"
+
+  sync_main || say "worktree: warning: sync couldn't fast-forward main; teardown's own checks still decide" >&2
+
+  merged=0
+  if [ "$discard" = 0 ]; then
+    [ -z "$(git -C "$wt" status --porcelain)" ] ||
+      die "$wt has uncommitted changes or untracked files, and removing it deletes them. Commit them, or rerun with --discard once the user agrees they can go."
+    if g merge-base --is-ancestor "$head" main; then
+      :
+    elif [ -n "$branch" ] && gh pr list --head "$branch" --state merged --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qxF "$head"; then
+      merged=1   # squash-merged: HEAD is exactly the merged PR's head
+    else
+      die "$wt's HEAD ($(git -C "$wt" rev-parse --short HEAD)) is neither on main nor the head of a merged PR. Land it, or rerun with --discard once the user agrees the work can go."
+    fi
+  fi
+
+  if [ "$discard" = 1 ]; then g worktree remove --force "$wt"; else g worktree remove "$wt"; fi
+  if [ -n "$branch" ]; then
+    # git branch -d can't see a squash merge.
+    if [ "$discard" = 1 ] || [ "$merged" = 1 ]; then g branch -q -D "$branch"; else g branch -q -d "$branch"; fi
+  fi
+  with_lock "$REG/.lock" "$SELF" __sweep
+  say "removed $wt${branch:+ and branch $branch}"
+}
+
+# ---- PR policy: land and sync ------------------------------------------
+
+cmd_land() {
+  msg=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --message) [ $# -ge 2 ] || die "--message needs a FILE"; msg=$2; shift 2 ;;
+      *) usage >&2; exit 2 ;;
+    esac
+  done
+  is_lane || die "land runs from a lane, not the primary checkout"
+  [ -z "$msg" ] || [ -f "$msg" ] || die "no such message file: $msg"
+  ! tracked_changes "$ROOT" || die "commit or stash the tracked changes first"
+  branch="$(g symbolic-ref --short -q HEAD)" || die "HEAD is detached; land needs a branch"
+  [ "$branch" != main ] || die "this lane is on main; land needs a branch of its own"
+  g fetch -q origin || die "git fetch origin failed"
+  g merge-base --is-ancestor origin/main HEAD ||
+    die "$branch lacks commits from origin/main. Run git rebase origin/main first, so CI tests what will merge."
+  count="$(g rev-list --count origin/main..HEAD)"
+  [ "$count" -gt 0 ] || die "nothing to land: $branch is at origin/main"
+  if [ -n "$msg" ]; then
+    g reset -q --soft origin/main
+    g commit -q -F "$msg"
+  elif [ "$count" -gt 1 ]; then
+    g log --oneline origin/main..HEAD >&2
+    die "$branch has $count commits. A lane lands as one commit, because GitHub titles a multi-commit squash after the branch. Rerun with --message FILE to squash them."
+  fi
+  g push -q --force-with-lease -u origin "$branch"
+  title="$(g log -1 --format=%s)"
+  body="$(g log -1 --format=%b)"
+  pr="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+  if [ -n "$pr" ]; then
+    gh pr edit "$pr" --title "$title" --body "$body" >/dev/null
+    say "updated PR #$pr from the commit"
+  else
+    gh pr create --base main --head "$branch" --title "$title" --body "$body"
+  fi
+}
+
+# Fast-forwards the primary's main to origin/main. Returns 1 with a message
+# instead of exiting, so teardown can warn and go on.
+sync_main() {
+  b="$(git -C "$PRIMARY" symbolic-ref --short -q HEAD || true)"
+  [ "$b" = main ] || { say "worktree: the primary is on ${b:-a detached HEAD}, not main" >&2; return 1; }
+  ! tracked_changes "$PRIMARY" || { say "worktree: the primary has tracked changes" >&2; return 1; }
+  git -C "$PRIMARY" fetch -q origin || { say "worktree: git fetch origin failed" >&2; return 1; }
+  ahead="$(git -C "$PRIMARY" rev-list --count origin/main..main)"
+  [ "$ahead" = 0 ] || { say "worktree: main has $ahead commit(s) that origin/main lacks; those need a PR" >&2; return 1; }
+  git -C "$PRIMARY" merge -q --ff-only origin/main || return 1
+  # bunk has no database, so there is nothing to migrate.
+  say "main is at origin/main ($(git -C "$PRIMARY" rev-parse --short HEAD))"
+}
+
+cmd_sync() {
+  is_lane && die "sync runs in the primary checkout ($PRIMARY)"
+  sync_main || exit 1
+}
+
+# ---- info and guard ------------------------------------------------------
+
+cmd_info() {
+  if ! is_lane; then
+    say "checkout  $ROOT (primary)"
+    say "lane      none; the primary keeps bunk's defaults"
+    say "real Rex  bin/bunk install, uninstall, and start run here"
+    return 0
+  fi
+  [ -f "$ROOT/worktree.env" ] || die "$ROOT is not provisioned; run bin/worktree setup"
+  # shellcheck disable=SC1091
+  lane="$(. "$ROOT/worktree.env" && printf '%s' "$WORKTREE_LANE")"
+  say "checkout  $ROOT"
+  say "branch    $(g symbolic-ref --short -q HEAD || echo '(detached)')"
+  say "lane      $lane"
+  say "primary   $PRIMARY"
+  say "isolated  nothing to isolate: bunk has no ports or databases, and make test makes its own temp dir and Rex server"
+  say "refused   bin/bunk start, bin/bunk install without --no-start, and install or uninstall against the real"
+  say "          init.lua or ~/.local/state/bunk (exit 3). Ask the user to run those in the primary."
+}
+
+# Checks the checkout that holds this file, not the working directory, so a
+# lane's script run from the primary's directory still counts as the lane.
+# No env var turns it off.
+cmd_guard() {
+  mode=${1:-} action=${2:-}
+  case "$mode" in --deny|--confirm|--warn) ;; *) usage >&2; exit 2 ;; esac
+  [ -n "$action" ] || die "guard needs an ACTION"
+  is_lane || return 0
+  case "$mode" in
+    --warn)
+      say "worktree: warning: $action is running from the lane at $ROOT" >&2
+      ;;
+    --deny)
+      say "worktree: $action refuses in a worktree lane ($ROOT). Run it from the primary checkout: $PRIMARY" >&2
+      exit 3
+      ;;
+    --confirm)
+      branch="$(g symbolic-ref --short -q HEAD || echo HEAD)"
+      if ! { : </dev/tty; } 2>/dev/null; then
+        say "worktree: $action needs confirmation on a terminal and there is none; refusing. Run it from the primary checkout: $PRIMARY" >&2
+        exit 3
+      fi
+      printf '%s runs from the lane at %s. Type the branch name (%s) to go on: ' "$action" "$ROOT" "$branch" >/dev/tty
+      read -r answer </dev/tty || answer=""
+      [ "$answer" = "$branch" ] || { say "worktree: $action refused" >&2; exit 3; }
+      ;;
+  esac
+}
+
+case "${1:-}" in
+  setup) cmd_setup ;;
+  info) cmd_info ;;
+  teardown) shift; cmd_teardown "$@" ;;
+  land) shift; cmd_land "$@" ;;
+  sync) cmd_sync ;;
+  guard) shift; cmd_guard "$@" ;;
+  __setup) do_setup ;;
+  __allocate) do_allocate ;;
+  __sweep) sweep_stale ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

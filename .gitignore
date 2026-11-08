@@ -1,0 +1,7 @@
+*.tmp
+
+# worktree lanes
+/worktree.env
+/worktree.env.tmp.*
+/.claude/worktrees/
+/tmp/
