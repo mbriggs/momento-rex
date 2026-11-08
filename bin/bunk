@@ -75,6 +75,8 @@ start_watcher() {
   fi
   mkdir -p "$STATE"
   # No session or pane: the watcher hears every session.
+  # `do` is rex's subcommand here, not the shell keyword.
+  # shellcheck disable=SC1010
   nohup env -u REX_SESSION -u REX_BLOCK "$rex" --autostart=false do "$LIB/watch.lua" --all "state_dir=$STATE" \
     >/dev/null 2>&1 </dev/null &
   say "Started the watcher."
@@ -128,12 +130,16 @@ cmd_uninstall() {
 
 cmd_status() {
   set +e
+  # `do` is rex's subcommand here, not the shell keyword.
+  # shellcheck disable=SC1010
   env -u REX_SESSION -u REX_BLOCK "$(rex_bin)" --autostart=false do "$LIB/status.lua" --all \
     "state_dir=$STATE" "config=$CONFIG"
   rc=$?
   set -e
   if [ "$rc" = 4 ]; then
     say "Rex isn't running."
+    # Pane files are named by block id, which is plain ASCII.
+    # shellcheck disable=SC2012
     ls "$STATE/panes" 2>/dev/null | sed 's/^/  saved: /'
   fi
   exit "$rc"

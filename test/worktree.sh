@@ -1,4 +1,6 @@
 #!/bin/bash
+# Variables read only inside check's single-quoted strings look unused.
+# shellcheck disable=SC2034
 # Tests bin/worktree, bin/bunk's lane guard, and the Bash hook in a temporary
 # repo with a bare remote and a stub gh. Lanes are narrowed to 90-95 so live
 # lanes in the real repo are never touched, and git gets its identity from the

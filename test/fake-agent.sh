@@ -14,7 +14,7 @@ case "$kind:${1:-}" in
   claude:--resume) id="$2"; how=resumed ;;
   codex:resume) id="$2"; how=resumed ;;
 esac
-newid() { uuidgen | tr 'A-Z' 'a-z'; }
+newid() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 [ -n "$id" ] || id="$(newid)"
 printf '%s %s %s cwd=%s alias=%s\n' "$kind" "$how" "$id" "$PWD" "${FAKE_ALIAS:-}" >> "$FAKE_LOG"
 

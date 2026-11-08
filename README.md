@@ -78,8 +78,18 @@ Nothing in Claude's or Codex's config, no shell rc changes, no launchd.
 ## Tests
 
 ```sh
-make test     # unit (luajit) + end-to-end
+make test     # lint + unit (luajit) + end-to-end
+make lint     # shellcheck + luacheck
 ```
+
+`mise.toml` pins shellcheck. luacheck 1.2 fails to load under Lua 5.5, so
+install it for LuaJIT:
+
+```sh
+luarocks --lua-version=5.1 --lua-dir="$(brew --prefix luajit)" install --local luacheck
+```
+
+`make lint` finds it on `PATH` or in `~/.luarocks/bin`.
 
 The end-to-end test starts a throwaway Rex server on a socket in a temp
 directory, with fake `claude` and `codex` programs that imitate the files
