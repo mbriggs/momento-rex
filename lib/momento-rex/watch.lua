@@ -1,4 +1,4 @@
--- bunk watcher. Run by Rex, from the line `bunk install` adds to init.lua:
+-- momento-rex watcher. Run by Rex, from the line `momento-rex install` adds to init.lua:
 --   rex --autostart=false do watch.lua --all state_dir=DIR [period=SECONDS]
 -- It exits when the server stops; the next server start runs a new one.
 
@@ -9,13 +9,13 @@ local core = require("core")
 local T = "com.superlogical.terminal"
 local args = rex.args or {}
 local HOME = os.getenv("HOME") or ""
-local STATE = args.state_dir or ((os.getenv("XDG_STATE_HOME") or (HOME .. "/.local/state")) .. "/bunk")
+local STATE = args.state_dir or ((os.getenv("XDG_STATE_HOME") or (HOME .. "/.local/state")) .. "/momento-rex")
 local PANES = STATE .. "/panes"
 local CLAUDE_DIR = os.getenv("CLAUDE_CONFIG_DIR") or (HOME .. "/.claude")
 local CODEX_HOME = os.getenv("CODEX_HOME") or (HOME .. "/.codex")
-local PERIOD = tonumber(args.period or os.getenv("BUNK_PERIOD")) or 3
+local PERIOD = tonumber(args.period or os.getenv("MOMENTO_REX_PERIOD")) or 3
 -- seconds of uptime before records of absent panes are collected
-local GC_AFTER = tonumber(args.gc_after or os.getenv("BUNK_GC_AFTER")) or 30
+local GC_AFTER = tonumber(args.gc_after or os.getenv("MOMENTO_REX_GC_AFTER")) or 30
 
 local function now() return os.time() end
 local function trim(s) return (s or ""):gsub("^%s+", ""):gsub("%s+$", "") end
@@ -38,7 +38,7 @@ local function write_atomic(path, s)
 end
 
 local function log(...)
-  local f = io.open(STATE .. "/bunk.log", "a")
+  local f = io.open(STATE .. "/momento-rex.log", "a")
   if not f then return end
   f:write(os.date("!%Y-%m-%dT%H:%M:%SZ "), table.concat({ ... }, " "), "\n")
   f:close()
@@ -58,15 +58,15 @@ rex.on("terminal.process_changed", function() end)
 rex.exec({ "mkdir", "-p", PANES })
 rex.exec({ "chmod", "700", STATE })
 do -- keep the log under 1 MB
-  local f = io.open(STATE .. "/bunk.log", "r")
+  local f = io.open(STATE .. "/momento-rex.log", "r")
   if f then
     local size = f:seek("end")
     f:close()
-    if size and size > 1024 * 1024 then os.rename(STATE .. "/bunk.log", STATE .. "/bunk.log.1") end
+    if size and size > 1024 * 1024 then os.rename(STATE .. "/momento-rex.log", STATE .. "/momento-rex.log.1") end
   end
 end
 
--- Newest watcher wins: a config reload or `bunk start` starts another one,
+-- Newest watcher wins: a config reload or `momento-rex start` starts another one,
 -- and the older one stops at its next tick. Uninstall overwrites the token
 -- too. The new watcher takes no step until the one it replaces has exited,
 -- so two watchers never act at once: one could otherwise overwrite a record
@@ -171,7 +171,7 @@ local function has_transcript(chat_id)
   return r ~= nil and r.ok and trim(r.stdout) ~= ""
 end
 
--- Per pane: the Claude pid bunk couldn't read a sessions file for, and when
+-- Per pane: the Claude pid momento-rex couldn't read a sessions file for, and when
 -- that started. Reset when the pane's agent changes.
 local unreadable = {}
 -- Per pane: the chat id whose transcript was found, so each chat is searched
@@ -194,7 +194,7 @@ local function find_chat(kind, pid, block_id)
       return chat
     end
     -- Claude writes no file while it asks whether to trust a folder, so a
-    -- missing file is only a problem after a while. A file bunk can't read
+    -- missing file is only a problem after a while. A file momento-rex can't read
     -- is one sooner.
     local u = unreadable[block_id]
     if not u or u.pid ~= pid then
@@ -242,7 +242,7 @@ end
 
 -- An agent that is a child of the pane's shell without being in front:
 -- Ctrl-Z'd, running an editor, or back in front since observe(). Without
--- this, a resumed chat bunk hadn't yet seen in front would be forgotten as
+-- this, a resumed chat momento-rex hadn't yet seen in front would be forgotten as
 -- "resume did not start" while it ran (verify/restore, finding F2).
 local function pane_agent(o, rec)
   if not o.shell_pid then return end

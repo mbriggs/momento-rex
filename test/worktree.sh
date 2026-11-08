@@ -1,21 +1,21 @@
 #!/bin/bash
 # Variables read only inside check's single-quoted strings look unused.
 # shellcheck disable=SC2034
-# Tests bin/worktree, bin/bunk's lane guard, and the Bash hook in a temporary
+# Tests bin/worktree, bin/momento-rex's lane guard, and the Bash hook in a temporary
 # repo with a bare remote and a stub gh. Lanes are narrowed to 90-95 so live
 # lanes in the real repo are never touched, and git gets its identity from the
 # environment because CI runners have none.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
-T="$(cd "$(mktemp -d /tmp/bunk-worktree.XXXX)" && pwd -P)"
+T="$(cd "$(mktemp -d /tmp/momento-rex-worktree.XXXX)" && pwd -P)"
 trap 'if [ -z "${KEEP:-}" ]; then rm -rf "$T"; else echo "kept $T"; fi' EXIT
 
 export WORKTREE_LANE_RANGE=90-95
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
-export HOME="$T/home"   # bin/bunk's real init.lua and state dir, for the guard tests
-unset XDG_CONFIG_HOME XDG_STATE_HOME REX_CONFIG BUNK_STATE_DIR WORKTREE_LANE WORKTREE_PRIMARY
+export HOME="$T/home"   # bin/momento-rex's real init.lua and state dir, for the guard tests
+unset XDG_CONFIG_HOME XDG_STATE_HOME REX_CONFIG MOMENTO_REX_STATE_DIR WORKTREE_LANE WORKTREE_PRIMARY
 mkdir -p "$HOME"
 
 PASS=0; FAIL=0
@@ -53,13 +53,13 @@ EOF
 chmod +x "$T/stub/gh"
 export WORKTREE_GH="$T/stub/gh"
 
-# The repo: bin/worktree, bin/bunk, lib/bunk, .gitignore, pushed to a bare remote.
+# The repo: bin/worktree, bin/momento-rex, lib/momento-rex, .gitignore, pushed to a bare remote.
 git init -q --bare -b main "$T/origin.git"
 P="$T/repo"
 git init -q -b main "$P"
 mkdir -p "$P/bin" "$P/lib"
-cp "$ROOT/bin/worktree" "$ROOT/bin/bunk" "$P/bin/"
-cp -R "$ROOT/lib/bunk" "$P/lib/"
+cp "$ROOT/bin/worktree" "$ROOT/bin/momento-rex" "$P/bin/"
+cp -R "$ROOT/lib/momento-rex" "$P/lib/"
 cp "$ROOT/.gitignore" "$P/"
 git -C "$P" add -A && git -C "$P" commit -q -m init
 git -C "$P" remote add origin "$T/origin.git"
@@ -85,7 +85,7 @@ lane a
 check "setup provisions a lane in the narrowed range" '(cd "$(L a)" && bin/worktree setup >/dev/null) && [ "$(lane_of "$(L a)")" = 90 ] && [ "$(cat "$P/tmp/worktrees/90")" = "$(L a)" ]'
 check "worktree.env is shell-sourceable" '( . "$(L a)/worktree.env" && [ "$WORKTREE_LANE" = 90 ] && [ "$WORKTREE_PRIMARY" = "$P" ] )'
 check "setup again reuses the lane" '(cd "$(L a)" && bin/worktree setup >/dev/null) && [ "$(lane_of "$(L a)")" = 90 ] && [ "$(reg_has "$(L a)")" = 1 ]'
-check "info in a lane names the lane and what it refuses" '(cd "$(L a)" && bin/worktree info) | grep -q "^lane      90" && (cd "$(L a)" && bin/worktree info) | grep -q "bin/bunk start"'
+check "info in a lane names the lane and what it refuses" '(cd "$(L a)" && bin/worktree info) | grep -q "^lane      90" && (cd "$(L a)" && bin/worktree info) | grep -q "bin/momento-rex start"'
 
 lane b
 for i in 1 2 3 4 5; do (cd "$(L b)" && bin/worktree setup >"$T/race-$i.log" 2>&1; echo $? > "$T/race-$i.rc") & done
@@ -128,15 +128,15 @@ check "guard --confirm with no terminal refuses" '[ "$(cd "$(L a)" && rc notty b
 check "a lane's guard run from the primary's directory still refuses" '[ "$(cd "$P" && rc "$(L a)/bin/worktree" guard --deny x)" = 3 ]'
 check "the primary's guard run from a lane's directory passes" '[ "$(cd "$(L a)" && rc "$W" guard --deny x)" = 0 ]'
 
-echo "bin/bunk in a lane"
-check "start refuses" '[ "$(cd "$(L a)" && rc bin/bunk start)" = 3 ]'
-check "install without --no-start refuses, even with a temp config" '[ "$(cd "$(L a)" && REX_CONFIG="$T/x/init.lua" BUNK_STATE_DIR="$T/x/state" rc bin/bunk install)" = 3 ]'
-check "install --no-start against the real init.lua refuses and writes nothing" '[ "$(cd "$(L a)" && rc bin/bunk install --no-start)" = 3 ] && [ ! -e "$HOME/.config/rex" ]'
-check "uninstall against the real init.lua refuses" '[ "$(cd "$(L a)" && rc bin/bunk uninstall)" = 3 ]'
-check "uninstall against the real state dir refuses" '[ "$(cd "$(L a)" && REX_CONFIG="$T/x/init.lua" rc bin/bunk uninstall)" = 3 ]'
-check "uninstall against a temp config and state runs (as e2e does)" '[ "$(cd "$(L a)" && REX_CONFIG="$T/x/init.lua" BUNK_STATE_DIR="$T/x/state" rc bin/bunk uninstall)" = 0 ]'
-check "a symlinked path to the real init.lua still refuses" 'mkdir -p "$HOME/.config/rex" && ln -s "$HOME/.config/rex" "$T/rexlink" && [ "$(cd "$(L a)" && REX_CONFIG="$T/rexlink/init.lua" BUNK_STATE_DIR="$T/x/state" rc bin/bunk uninstall)" = 3 ]'
-check "the primary's uninstall runs" '[ "$(cd "$P" && rc bin/bunk uninstall)" = 0 ]'
+echo "bin/momento-rex in a lane"
+check "start refuses" '[ "$(cd "$(L a)" && rc bin/momento-rex start)" = 3 ]'
+check "install without --no-start refuses, even with a temp config" '[ "$(cd "$(L a)" && REX_CONFIG="$T/x/init.lua" MOMENTO_REX_STATE_DIR="$T/x/state" rc bin/momento-rex install)" = 3 ]'
+check "install --no-start against the real init.lua refuses and writes nothing" '[ "$(cd "$(L a)" && rc bin/momento-rex install --no-start)" = 3 ] && [ ! -e "$HOME/.config/rex" ]'
+check "uninstall against the real init.lua refuses" '[ "$(cd "$(L a)" && rc bin/momento-rex uninstall)" = 3 ]'
+check "uninstall against the real state dir refuses" '[ "$(cd "$(L a)" && REX_CONFIG="$T/x/init.lua" rc bin/momento-rex uninstall)" = 3 ]'
+check "uninstall against a temp config and state runs (as e2e does)" '[ "$(cd "$(L a)" && REX_CONFIG="$T/x/init.lua" MOMENTO_REX_STATE_DIR="$T/x/state" rc bin/momento-rex uninstall)" = 0 ]'
+check "a symlinked path to the real init.lua still refuses" 'mkdir -p "$HOME/.config/rex" && ln -s "$HOME/.config/rex" "$T/rexlink" && [ "$(cd "$(L a)" && REX_CONFIG="$T/rexlink/init.lua" MOMENTO_REX_STATE_DIR="$T/x/state" rc bin/momento-rex uninstall)" = 3 ]'
+check "the primary's uninstall runs" '[ "$(cd "$P" && rc bin/momento-rex uninstall)" = 0 ]'
 
 echo "land"
 A="$(L a)"

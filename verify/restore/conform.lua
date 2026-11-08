@@ -2,7 +2,7 @@
 -- compares. Run: luajit conform.lua REPO_ROOT < table   (check does this)
 -- Each table line: rec | observation | now | agent_alive | exit_seen | actions
 local root = assert(arg[1], "usage: luajit conform.lua REPO_ROOT < table")
-package.path = root .. "/lib/bunk/?.lua;" .. package.path
+package.path = root .. "/lib/momento-rex/?.lua;" .. package.path
 local core = require("core")
 
 local UUID = { "94681d99-5e6c-4737-b1e6-d26e53da1ad8", "7bc34ce9-9740-412b-a465-2fc460220181" }

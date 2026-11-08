@@ -1,27 +1,27 @@
 #!/bin/sh
-# bunk: bring Claude Code and Codex chats back after Rex restarts.
+# momento-rex: bring Claude Code and Codex chats back after Rex restarts.
 # POSIX sh on purpose: install and uninstall must work when Rex isn't running
 # (`rex do` refuses to run without a server).
 set -eu
 
-PROG=bunk
+PROG=momento-rex
 VERSION=0.1.0
 
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
-LIB="$ROOT/lib/bunk"
+LIB="$ROOT/lib/momento-rex"
 [ -f "$LIB/watch.lua" ] || die "can't find $LIB/watch.lua"
 
-STATE="${BUNK_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/bunk}"
+STATE="${MOMENTO_REX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/momento-rex}"
 CONFIG="${REX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/rex/init.lua}"
-TAG="-- bunk:managed"
+TAG="-- momento-rex:managed"
 
 # In a worktree lane (a checkout whose .git is a file), refuse whatever
 # reaches the user's real Rex: the real init.lua, the real state dir, or a
 # watcher on the running server. The e2e test points REX_CONFIG and
-# BUNK_STATE_DIR at a temp dir and never starts a watcher, so it passes.
+# MOMENTO_REX_STATE_DIR at a temp dir and never starts a watcher, so it passes.
 # Homebrew installs have no .git and skip this.
 abspath() {
   d="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || d="$(dirname "$1")"
@@ -32,14 +32,14 @@ touches_real_files() {
   for real in "${XDG_CONFIG_HOME:-$HOME/.config}/rex/init.lua" "$HOME/.config/rex/init.lua"; do
     [ "$c" = "$(abspath "$real")" ] && return 0
   done
-  for real in "${XDG_STATE_HOME:-$HOME/.local/state}/bunk" "$HOME/.local/state/bunk"; do
+  for real in "${XDG_STATE_HOME:-$HOME/.local/state}/momento-rex" "$HOME/.local/state/momento-rex"; do
     [ "$s" = "$(abspath "$real")" ] && return 0
   done
   return 1
 }
 lane_deny() {
   [ -f "$ROOT/.git" ] || return 0
-  "$ROOT/bin/worktree" guard --deny "bin/bunk $1" || exit $?
+  "$ROOT/bin/worktree" guard --deny "bin/momento-rex $1" || exit $?
 }
 
 rex_bin() {
@@ -58,7 +58,7 @@ luaq() {
 }
 
 init_line() {
-  printf 'if not os.getenv("BUNK_NO_START") then local d = os.getenv("REX_BIN_DIR"); pcall(rex.exec.start, {d and (d .. "/rex") or %s, "--autostart=false", "do", %s, "--all", %s}, {detach = true, stdout = false, stderr = false}) end %s\n' \
+  printf 'if not os.getenv("MOMENTO_REX_NO_START") then local d = os.getenv("REX_BIN_DIR"); pcall(rex.exec.start, {d and (d .. "/rex") or %s, "--autostart=false", "do", %s, "--all", %s}, {detach = true, stdout = false, stderr = false}) end %s\n' \
     "$(luaq "$(rex_bin)")" "$(luaq "$LIB/watch.lua")" "$(luaq "state_dir=$STATE")" "$TAG"
 }
 
@@ -93,20 +93,20 @@ cmd_install() {
   [ "$no_start" = 1 ] || lane_deny "install (starts a watcher on your real Rex server)"
   ! touches_real_files || lane_deny "install (writes your real init.lua)"
   mkdir -p "$(dirname "$CONFIG")"
-  tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.bunk.XXXXXX")"
+  tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.momento-rex.XXXXXX")"
   if [ -f "$CONFIG" ]; then grep -vF -- "$TAG" "$CONFIG" > "$tmp" || true; fi
   init_line >> "$tmp"
   if [ -f "$CONFIG" ] && cmp -s "$tmp" "$CONFIG"; then
     rm -f "$tmp"
     say "init.lua is already set up: $CONFIG"
   else
-    if ! BUNK_NO_START=1 REX_CONFIG="$tmp" "$(rex_bin)" --autostart=false config check >/dev/null 2>&1; then
+    if ! MOMENTO_REX_NO_START=1 REX_CONFIG="$tmp" "$(rex_bin)" --autostart=false config check >/dev/null 2>&1; then
       rm -f "$tmp"
       die "the new init.lua didn't pass 'rex config check'; $CONFIG is unchanged"
     fi
-    [ -f "$CONFIG" ] && cp -p "$CONFIG" "$CONFIG.bunk-backup"
+    [ -f "$CONFIG" ] && cp -p "$CONFIG" "$CONFIG.momento-rex-backup"
     replace "$tmp" "$CONFIG"
-    say "Added one line to $CONFIG (backup: $CONFIG.bunk-backup)."
+    say "Added one line to $CONFIG (backup: $CONFIG.momento-rex-backup)."
   fi
   [ "$no_start" = 1 ] || start_watcher
 }
@@ -114,13 +114,13 @@ cmd_install() {
 cmd_uninstall() {
   ! touches_real_files || lane_deny "uninstall (writes your real init.lua)"
   if [ -f "$CONFIG" ] && grep -qF -- "$TAG" "$CONFIG"; then
-    tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.bunk.XXXXXX")"
+    tmp="$(mktemp "$(dirname "$CONFIG")/.init.lua.momento-rex.XXXXXX")"
     grep -vF -- "$TAG" "$CONFIG" > "$tmp" || true
-    cp -p "$CONFIG" "$CONFIG.bunk-backup"
+    cp -p "$CONFIG" "$CONFIG.momento-rex-backup"
     replace "$tmp" "$CONFIG"
-    say "Removed bunk's line from $CONFIG."
+    say "Removed momento-rex's line from $CONFIG."
   else
-    say "init.lua has no bunk line."
+    say "init.lua has no momento-rex line."
   fi
   if [ -d "$STATE" ]; then
     printf 'uninstalled\n' > "$STATE/watcher.token"

@@ -1,18 +1,20 @@
 ------------------------------ MODULE Restore ------------------------------
 (***************************************************************************)
-(* One Rex pane, the agent running in it, its saved record, and the bunk   *)
-(* watchers that read and write that record, across Rex restarts.          *)
+(* One Rex pane, the agent running in it, its saved record, and the        *)
+(* momento-rex watchers that read and write that record, across Rex        *)
+(* restarts.                                                               *)
 (*                                                                         *)
 (* Code this models (see SKILL.md for the coverage table):                 *)
-(*   Decide           core.decide              lib/bunk/core.lua           *)
-(*   Observe          observe, find_chat       lib/bunk/watch.lua          *)
-(*   Load             step: load, pane_agent   lib/bunk/watch.lua          *)
-(*   Guard / Do /     step, guard,             lib/bunk/watch.lua          *)
+(*   Decide           core.decide              lib/momento-rex/core.lua    *)
+(*   Observe          observe, find_chat       lib/momento-rex/watch.lua   *)
+(*   Load             step: load, pane_agent   lib/momento-rex/watch.lua   *)
+(*   Guard / Do /     step, guard,             lib/momento-rex/watch.lua   *)
 (*   Recheck / Type / still_at_prompt                                      *)
 (*   Finish                                                                *)
 (*   StopIdle         guard() in full_pass                                 *)
 (*   StartWatcher /   startup: watcher.pid, watcher.token, the wait        *)
-(*   Wait             for the previous watcher; bin/bunk start_watcher     *)
+(*   Wait             for the previous watcher;                            *)
+(*                    bin/momento-rex start_watcher                        *)
 (*   Restart          a Rex server restart: the old watcher exits with the *)
 (*                    server, init.lua starts a new one, and the pane      *)
 (*                    comes back as a fresh shell                          *)
@@ -34,7 +36,7 @@ CONSTANTS
   MaxTime,       \* clock ticks
   EXIT_CONFIRM,  \* core.EXIT_CONFIRM
   RESUME_GRACE,  \* core.RESUME_GRACE
-  Handoff,       \* TRUE: `bunk start` or a config reload can start a second watcher
+  Handoff,       \* TRUE: `momento-rex start` or a config reload can start a second watcher
                  \* while one runs. FALSE: watchers only change at a Rex restart.
   FenceMidStep,  \* TRUE: the user, the agent, and the clock hold still while a
                  \* watcher is between its observe() and its last action
@@ -71,8 +73,8 @@ VARIABLES
   \* --- ghosts: only the properties read these ---
   typed,      \* resume lines typed into each shell
   badType,    \* a resume line landed somewhere other than the shell prompt
-  known,      \* the running agent's chat, once bunk has saved it for that agent
-  owed,       \* chat bunk had saved and running at the last restart, not yet resumed
+  known,      \* the running agent's chat, once momento-rex has saved it for that agent
+  owed,       \* chat momento-rex had saved and running at the last restart, not yet resumed
   lost        \* a restart found a saved, running chat missing from the record
 
 world   == <<shell, top, ag, apid, achat, sess, transcript, pending>>
@@ -261,7 +263,7 @@ StopIdle(w) ==
   /\ Die(w)
   /\ UNCHANGED <<world, disk, counts, ghosts>>
 
-\* `bunk start`, `bunk install`, or a config reload: a new watcher writes its
+\* `momento-rex start`, `momento-rex install`, or a config reload: a new watcher writes its
 \* token, then waits for the watcher it replaced to exit before its first step.
 StartWatcher ==
   /\ Handoff /\ nextW <= MaxWatchers
@@ -352,7 +354,7 @@ Clear ==        \* /clear: same process, new chat id, transcript appears at once
   /\ StepsIdle /\ ag = "fg" /\ nextChat <= MaxChats
   /\ achat' = nextChat /\ transcript' = transcript \cup {nextChat}
   /\ nextChat' = nextChat + 1
-  /\ known' = 0      \* bunk may lag a /clear until its next pass (README "Limits")
+  /\ known' = 0      \* momento-rex may lag a /clear until its next pass (README "Limits")
   /\ UNCHANGED <<shell, top, ag, apid, sess, pending, owed, disk, wvars,
                  now, restarts, nextPid, nextW, typed, badType, lost>>
 
@@ -403,7 +405,7 @@ OneResumePerShell == \A s \in Shells : typed[s] <= 1
 \* A resume line is only ever typed into the pane's own shell prompt.
 ResumeLandsAtPrompt == ~badType
 
-\* A chat bunk has saved stays saved while its agent runs, through a restart,
+\* A chat momento-rex has saved stays saved while its agent runs, through a restart,
 \* and until its resume line runs in the restored shell.
 SavedChatSurvives ==
   /\ ~lost

@@ -1,6 +1,6 @@
 interface:
   display_name: "Worktree lanes"
-  short_description: "Work, land, and clean up in a bunk worktree lane"
+  short_description: "Work, land, and clean up in a momento-rex worktree lane"
   default_prompt: "Use $worktree to work in a lane."
 policy:
   allow_implicit_invocation: true

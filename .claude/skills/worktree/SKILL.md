@@ -1,13 +1,13 @@
 ---
 name: worktree
-description: Work in a bunk worktree lane. Use before the first file write in the primary checkout, when the user asks for a parallel session, and when the working directory is under .claude/worktrees/.
+description: Work in a momento-rex worktree lane. Use before the first file write in the primary checkout, when the user asks for a parallel session, and when the working directory is under .claude/worktrees/.
 ---
 
-# Worktree lanes in bunk
+# Worktree lanes in momento-rex
 
-A **lane** is a linked git worktree that `bin/worktree` provisions. Write code in a lane, not in the primary checkout. The primary stays on `main`, and the user's real Rex runs bunk from there.
+A **lane** is a linked git worktree that `bin/worktree` provisions. Write code in a lane, not in the primary checkout. The primary stays on `main`, and the user's real Rex runs momento-rex from there.
 
-bunk has no ports, databases, or build outputs to isolate. `make test` makes its own temp dir and private Rex server each run, so any number of lanes can run it at once. A lane's only job is to keep its work off `main` and off the user's real Rex.
+momento-rex has no ports, databases, or build outputs to isolate. `make test` makes its own temp dir and private Rex server each run, so any number of lanes can run it at once. A lane's only job is to keep its work off `main` and off the user's real Rex.
 
 ## Creating a lane
 
@@ -20,9 +20,9 @@ The first Bash command in a new lane provisions it and prints `bin/worktree info
 
 ## Commands in a lane
 
-- `make test`, `make unit`, `make worktree`, `make e2e`, and the verify-bunk sandbox run the lane's own code against throwaway servers. Run them freely.
-- `bin/bunk status` reads the user's real `~/.local/state/bunk`. Running it is harmless.
-- `bin/bunk start`, `bin/bunk install` without `--no-start`, and `install` or `uninstall` against the real `~/.config/rex/init.lua` or `~/.local/state/bunk` exit 3 in a lane. They would point the user's real Rex at a lane that teardown deletes, or start a second watcher that types every resume twice. Ask the user to run them from the primary. With `REX_CONFIG` and `BUNK_STATE_DIR` pointed at a temp dir, `install --no-start` and `uninstall` run, as the e2e test does.
+- `make test`, `make unit`, `make worktree`, `make e2e`, and the verify-momento-rex sandbox run the lane's own code against throwaway servers. Run them freely.
+- `bin/momento-rex status` reads the user's real `~/.local/state/momento-rex`. Running it is harmless.
+- `bin/momento-rex start`, `bin/momento-rex install` without `--no-start`, and `install` or `uninstall` against the real `~/.config/rex/init.lua` or `~/.local/state/momento-rex` exit 3 in a lane. They would point the user's real Rex at a lane that teardown deletes, or start a second watcher that types every resume twice. Ask the user to run them from the primary. With `REX_CONFIG` and `MOMENTO_REX_STATE_DIR` pointed at a temp dir, `install --no-start` and `uninstall` run, as the e2e test does.
 
 The env hook picks the checkout from the directory a command starts in, so `cd <lane> && cmd` run from the primary gets the primary's env. Start lane commands with the lane as the working directory.
 
@@ -34,7 +34,7 @@ A session isolated to a worktree can't run git against the primary. Call `ExitWo
 
 Lanes land through GitHub PRs into `main`, one commit per lane, which the user squash-merges.
 
-1. If the diff touches `bin/bunk` or `lib/bunk/`, `make test` alone doesn't prove it. Run [verify-bunk](../verify-bunk/SKILL.md) on every journey in its `features/` map that the change can affect, and put each journey's result and evidence path in the commit body. A lane refuses `bunk start`, so for `restore-watcher-only` ask the user to drive it from the primary, or list it in the body as not driven.
+1. If the diff touches `bin/momento-rex` or `lib/momento-rex/`, `make test` alone doesn't prove it. Run [verify-momento-rex](../verify-momento-rex/SKILL.md) on every journey in its `features/` map that the change can affect, and put each journey's result and evidence path in the commit body. A lane refuses `momento-rex start`, so for `restore-watcher-only` ask the user to drive it from the primary, or list it in the body as not driven.
 2. Commit in the lane, rebased on `origin/main`.
 3. Run `bin/worktree land` from the lane. It pushes and opens the PR, or updates the open PR's title and body from the commit. With several commits it refuses; write the message to a file and run `bin/worktree land --message FILE` to squash them.
 4. Own the PR until it merges: watch CI, answer review comments, and re-land fixes with `--message`.

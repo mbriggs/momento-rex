@@ -1,13 +1,13 @@
-# bunk
+# momento-rex
 
 Rex restores your sessions, panes, folders and scrollback when its server
-restarts, but every pane comes back as a fresh shell. bunk brings back the
+restarts, but every pane comes back as a fresh shell. momento-rex brings back the
 Claude Code or Codex chat that was running in each pane.
 
 ```sh
-bin/bunk install     # adds one line to ~/.config/rex/init.lua and starts the watcher
-bin/bunk status      # watcher health, saved chats, problems (exits 1 if something's wrong)
-bin/bunk uninstall   # removes the line and stops the watcher; saved chats stay
+bin/momento-rex install     # adds one line to ~/.config/rex/init.lua and starts the watcher
+bin/momento-rex status      # watcher health, saved chats, problems (exits 1 if something's wrong)
+bin/momento-rex uninstall   # removes the line and stops the watcher; saved chats stay
 ```
 
 ## How it works
@@ -15,8 +15,8 @@ bin/bunk uninstall   # removes the line and stops the watcher; saved chats stay
 Rex starts the watcher from init.lua and stops it when the server stops:
 
 ```
-init.lua ──► rex do lib/bunk/watch.lua --all      (one per server; on reload the new one
-                                                    waits for the old one to exit, then takes over)
+init.lua ──► rex do lib/momento-rex/watch.lua --all (one per server; on reload the new one
+                                                      waits for the old one to exit, then takes over)
                every 3s, for every pane:
                  agent in front  → save {agent, chat id, folder, shell identity}
                  agent exited    → forget the chat (confirmed on a second look)
@@ -31,7 +31,7 @@ shell is the same and nothing is typed.
 Chat IDs come from files the agents keep while they run:
 
 - **Claude Code**: `~/.claude/sessions/<pid>.json` (`$CLAUDE_CONFIG_DIR`).
-  Claude deletes it on exit, even when Rex kills it, so bunk copies the ID
+  Claude deletes it on exit, even when Rex kills it, so momento-rex copies the ID
   while Claude runs. `/clear` and `/resume` show up within one pass. A new
   chat is saved once its transcript (`projects/<folder>/<id>.jsonl`) exists,
   which is after the first message, because Claude can't resume a chat
@@ -48,31 +48,31 @@ reported.
 
 ## What it touches
 
-- One line in init.lua, tagged `-- bunk:managed`. Install backs the file up to
-  `init.lua.bunk-backup` and runs `rex config check` on the new version first.
+- One line in init.lua, tagged `-- momento-rex:managed`. Install backs the file up to
+  `init.lua.momento-rex-backup` and runs `rex config check` on the new version first.
   Uninstall removes only tagged lines.
-- `~/.local/state/bunk/` (`$BUNK_STATE_DIR`): one record per pane, the
-  watcher's token, `status.json`, and `bunk.log`.
+- `~/.local/state/momento-rex/` (`$MOMENTO_REX_STATE_DIR`): one record per pane, the
+  watcher's token, `status.json`, and `momento-rex.log`.
 
 Nothing in Claude's or Codex's config, no shell rc changes, no launchd.
 
 ## Limits
 
-- bunk relies on files the agents don't document. If Claude's sessions file
-  or Codex's rollout name changes, `bunk status` names the problem
+- momento-rex relies on files the agents don't document. If Claude's sessions file
+  or Codex's rollout name changes, `momento-rex status` names the problem
   (`claude.sessions`, `codex.rollout`) rather than failing silently. If
   Claude moves its transcripts, chats stop being saved and nothing reports it.
 - A chat you switch within the last few seconds before Rex stops may come
   back as the previous chat. A chat you quit in the last two seconds may come
   back; quit it again.
-- bunk checks that the pane's shell is at its prompt just before it types,
+- momento-rex checks that the pane's shell is at its prompt just before it types,
   but Rex can't make that check and the typing one step. A command you start
   in the moment between them gets the resume line instead.
 - If the restored shell takes more than about 17 seconds to run the typed
-  resume line, bunk forgets the chat until it sees the agent running again. A
+  resume line, momento-rex forgets the chat until it sees the agent running again. A
   Rex restart in that gap doesn't bring the chat back.
 - A pane with a different `CLAUDE_CONFIG_DIR` from the Rex server isn't seen.
-- Each Rex host runs its own watcher; install bunk on each host.
+- Each Rex host runs its own watcher; install momento-rex on each host.
 - Typed commands use POSIX `cd -- '...' &&` syntax: zsh, bash, and fish 3+.
 
 ## Tests
