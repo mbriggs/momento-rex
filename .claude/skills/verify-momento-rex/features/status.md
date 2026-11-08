@@ -18,7 +18,7 @@
 
 Preconditions:
 
-- A fresh run from `eval "$($S up)"`, with `$S doctor` exiting 0.
+- A fresh run from `$S up`, with `$S doctor` exiting 0.
 
 - **Healthy, empty.** Run `$S momento-rex status; echo rc=$?`. The output shows `watcher running`, `init.lua set up`, `chats none saved`, and `rc=0`.
 - **With chats.** Start a claude chat in pane `a` (see `save-chats.md`), then run `$S momento-rex status`. A line under `chats` shows the block's last 8 characters, `claude`, the first 8 characters of the chat ID, `live`, and the folder.

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Verify the restore model"
+  short_description: "Model-check momento-rex's resume protocol with TLA+"
+  default_prompt: "Use $verify-restore-model to model-check this change."
+policy:
+  allow_implicit_invocation: true

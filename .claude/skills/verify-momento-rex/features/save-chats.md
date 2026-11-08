@@ -21,7 +21,7 @@ While Rex runs, the watcher keeps one record per pane that has Claude Code or Co
 
 Preconditions:
 
-- A fresh run from `eval "$($S up)"`, with `$S doctor` exiting 0.
+- A fresh run from `$S up`, with `$S doctor` exiting 0.
 
 - **Nothing before the first message.** Run `read -r SA BA < <($S pane a); sleep 1; $S type $SA $BA claude; sleep 3; $S record $BA; echo rc=$?`. The command prints `rc=1`.
 - **Saved after it.** Run `$S type $SA $BA hello; $S wait 10 $S record $BA; $S record $BA`. The JSON has `agent` `claude`, a UUID `chat_id`, `cwd` `$BV_RUN/work`, and `state` `live`.

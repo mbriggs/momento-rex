@@ -1,0 +1,6 @@
+interface:
+  display_name: "Verify momento-rex"
+  short_description: "Drive momento-rex in a throwaway Rex server and capture proof"
+  default_prompt: "Use $verify-momento-rex to verify this change."
+policy:
+  allow_implicit_invocation: true
