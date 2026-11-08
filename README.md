@@ -15,8 +15,7 @@ The command goes in as typed input, so your aliases apply and it lands in
 your shell history.
 
 Rex is in public testing and changes quickly, so momento-rex will likely go
-away once Rex does this itself. Before you install it, restart Rex with a
-chat open and check whether the chat comes back without it.
+away once Rex does this itself, or enables a more elegant way to do it.
 
 ## Requirements
 
