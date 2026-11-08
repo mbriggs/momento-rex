@@ -34,10 +34,11 @@ A session isolated to a worktree can't run git against the primary. Call `ExitWo
 
 Lanes land through GitHub PRs into `main`, one commit per lane, which the user squash-merges.
 
-1. Commit in the lane, rebased on `origin/main`.
-2. Run `bin/worktree land` from the lane. It pushes and opens the PR, or updates the open PR's title and body from the commit. With several commits it refuses; write the message to a file and run `bin/worktree land --message FILE` to squash them.
-3. Own the PR until it merges: watch CI, answer review comments, and re-land fixes with `--message`.
-4. After the merge, run `bin/worktree sync` from the primary to fast-forward `main`.
+1. If the diff touches `bin/bunk` or `lib/bunk/`, `make test` alone doesn't prove it. Run [verify-bunk](../verify-bunk/SKILL.md) on every journey in its `features/` map that the change can affect, and put each journey's result and evidence path in the commit body. A lane refuses `bunk start`, so for `restore-watcher-only` ask the user to drive it from the primary, or list it in the body as not driven.
+2. Commit in the lane, rebased on `origin/main`.
+3. Run `bin/worktree land` from the lane. It pushes and opens the PR, or updates the open PR's title and body from the commit. With several commits it refuses; write the message to a file and run `bin/worktree land --message FILE` to squash them.
+4. Own the PR until it merges: watch CI, answer review comments, and re-land fixes with `--message`.
+5. After the merge, run `bin/worktree sync` from the primary to fast-forward `main`.
 
 To keep working in the lane after a squash merge, run `git rebase --onto origin/main <merged PR head>`. A plain rebase replays the commits that were squashed.
 
