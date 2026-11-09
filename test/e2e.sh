@@ -49,13 +49,15 @@ cp "$T/init.lua" "$T/init.orig"
 mkdir -p "$T/rexshim"
 printf '#!/bin/sh\nexec %q -S %q "$@"\n' "$(command -v rex)" "$SOCK" > "$T/rexshim/rex"
 chmod +x "$T/rexshim/rex"
-B() { env -u REX_SESSION -u REX_BLOCK REX_BIN_DIR="$T/rexshim" REX_CONFIG="$T/init.lua" MOMENTO_REX_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/momento-rex" "$@"; }
+# HOME is $T for the installer and the server, so the state dir sits under
+# HOME and init.lua names it as `h .. "/state"`.
+B() { env -u REX_SESSION -u REX_BLOCK HOME="$T" REX_BIN_DIR="$T/rexshim" REX_CONFIG="$T/init.lua" MOMENTO_REX_STATE_DIR="$STATE" REX_SERVER="$SOCK" "$ROOT/bin/momento-rex" "$@"; }
 
 start_server() {
   local unset_args
   unset_args="$(env | grep -E '^(REX_|CLAUDE|CODEX_|MOMENTO_REX_)[A-Za-z0-9_]*=' | cut -d= -f1 | sed 's/^/-u /' | tr '\n' ' ')"
   # shellcheck disable=SC2086
-  ( env $unset_args REX_SERVER="$SOCK" ZDOTDIR="$T/zdot" CLAUDE_CONFIG_DIR="$T/claude" CODEX_HOME="$T/codex" \
+  ( env $unset_args HOME="$T" REX_SERVER="$SOCK" ZDOTDIR="$T/zdot" CLAUDE_CONFIG_DIR="$T/claude" CODEX_HOME="$T/codex" \
       FAKE_LOG="$T/launches" MOMENTO_REX_PERIOD=1 MOMENTO_REX_GC_AFTER=6 \
       rex server run --listen "$SOCK" --state-dir "$T/rex" --config "$T/init.lua" \
       >> "$T/server.log" 2>&1 < /dev/null & )
@@ -92,6 +94,7 @@ echo "install"
 B install --no-start >/dev/null
 check "install adds one tagged line and keeps user content" \
   '[ "$(grep -c "momento-rex:managed" "$T/init.lua")" = 1 ] && head -2 "$T/init.lua" | cmp -s - "$T/init.orig"'
+check "init.lua names paths under HOME through h" 'grep -qF "\"state_dir=\" .. h .. \"/state\"" "$T/init.lua"' "$(tail -1 "$T/init.lua")"
 B install --no-start >/dev/null
 check "install twice changes nothing" '[ "$(grep -c "momento-rex:managed" "$T/init.lua")" = 1 ]'
 
