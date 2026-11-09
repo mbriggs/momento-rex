@@ -57,9 +57,23 @@ luaq() {
   printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 }
 
+# A Lua expression for the string $1$2. When $2 is under $HOME it becomes
+# `h .. "/rest"`, and the line sets h from HOME when Rex loads it, so an
+# init.lua kept in a dotfiles repo works on machines with another home.
+luapath() {
+  case "$HOME" in
+    /*[!/]*) case "$2" in "$HOME"/*)
+      if [ -n "$1" ]; then printf '%s .. ' "$(luaq "$1")"; fi
+      printf 'h .. %s' "$(luaq "${2#"$HOME"}")"
+      return ;;
+    esac ;;
+  esac
+  luaq "$1$2"
+}
+
 init_line() {
-  printf 'if not os.getenv("MOMENTO_REX_NO_START") then local d = os.getenv("REX_BIN_DIR"); pcall(rex.exec.start, {d and (d .. "/rex") or %s, "--autostart=false", "do", %s, "--all", %s}, {detach = true, stdout = false, stderr = false}) end %s\n' \
-    "$(luaq "$(rex_bin)")" "$(luaq "$LIB/watch.lua")" "$(luaq "state_dir=$STATE")" "$TAG"
+  printf 'if not os.getenv("MOMENTO_REX_NO_START") then local h = os.getenv("HOME") or ""; local d = os.getenv("REX_BIN_DIR"); pcall(rex.exec.start, {d and (d .. "/rex") or (%s), "--autostart=false", "do", %s, "--all", %s}, {detach = true, stdout = false, stderr = false}) end %s\n' \
+    "$(luapath "" "$(rex_bin)")" "$(luapath "" "$LIB/watch.lua")" "$(luapath "state_dir=" "$STATE")" "$TAG"
 }
 
 # Write $1's contents over $2, keeping $2's symlink and permissions.
