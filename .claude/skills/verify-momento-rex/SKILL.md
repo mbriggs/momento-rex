@@ -1,6 +1,6 @@
 ---
 name: verify-momento-rex
-description: Drive momento-rex end to end in a throwaway Rex server and capture proof. Use to verify a change to bin/momento-rex or lib/momento-rex, or to reproduce a save, restore, install, or status bug.
+description: Drive momento-rex end to end in a throwaway Rex server and capture proof. Use to verify a change to bin/momento-rex or lib/momento-rex, to run the landing check (sandbox all) before bin/worktree land, or to reproduce a save, restore, install, or status bug.
 ---
 
 # Verify momento-rex
@@ -20,6 +20,22 @@ Run everything from the repo root. It needs `rex`, `jq`, `zsh`, `uuidgen`, and `
 ```sh
 S=.claude/skills/verify-momento-rex/bin/sandbox
 ```
+
+## The all run
+
+```sh
+$S all      # every journey on the committed tree; exit 0 and a stamp only if all pass
+```
+
+`all` is the landing check: `bin/worktree land` refuses a change to anything but Markdown without its stamp. It refuses to start with uncommitted or untracked changes, since the stamp names the committed tree. It runs `bin/journeys`, which drives every sub-feature in `features/`, each journey from its own fresh `up`, and prints one `ok` or `FAIL` line per sub-feature ID. When every check passes, it writes `verified`, holding `HEAD^{tree}`, into the run's evidence directory, `/tmp/momento-rex-verify-evidence/all.XXXX/`. Each journey's run and snaps sit inside that directory, and `journeys.txt` holds the output.
+
+The journeys run under `env -i` with `PATH=/usr/bin:/bin:/usr/sbin:/sbin` plus the Rex app's own `rex` directory, and a throwaway `HOME`. Your shell rc, mise, Homebrew, and `~/.config` play no part, so a pass doesn't depend on what this machine has installed. The run needs the Rex app at `~/Library/Application Support/com.superlogical.rex/` and takes about two minutes.
+
+A `FAIL` line prints what it saw. To dig in, drive that journey by hand with the commands below. After a fix, commit and run `all` again, because a stamp counts only for the tree it names.
+
+The all run drives `restore-watcher-only` in a lane as well. The CLI refuses `momento-rex start` there, so the run starts the replacement watcher itself with the command `start` runs, against the sandbox server.
+
+When you change a journey's recipe or add one, change `bin/journeys` to match, so the all run keeps covering every sub-feature.
 
 ## Launch
 
@@ -91,4 +107,4 @@ $S down
 
 ## Adding a journey
 
-A feature file starts with an H1 title and one paragraph describing the user-visible behavior. Four H2 sections follow in this order: `Sub-features`, `How to get to it (user POV)`, `Driving it with sandbox` (starting with `Preconditions:`), and `Gotchas`. Leave implementation details out unless a verifier needs them to read the evidence. Add the file to the list under Journeys.
+A feature file starts with an H1 title and one paragraph describing the user-visible behavior. Four H2 sections follow in this order: `Sub-features`, `How to get to it (user POV)`, `Driving it with sandbox` (starting with `Preconditions:`), and `Gotchas`. Leave implementation details out unless a verifier needs them to read the evidence. Add the file to the list under Journeys, and add a check per sub-feature ID to `bin/journeys`.
