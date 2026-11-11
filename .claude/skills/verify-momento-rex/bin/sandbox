@@ -4,6 +4,7 @@
 # rex call goes to the sandbox socket, and `up` aborts if the server it
 # reaches isn't that one.
 #
+#   sandbox all                   every journey on the committed tree; stamps it if all pass
 #   sandbox up                    create a run, install momento-rex, start the server
 #   sandbox doctor                is this run's server and watcher healthy?
 #   sandbox pane NAME [DIR]       new session; prints "SESSION BLOCK"
@@ -152,8 +153,40 @@ cmd_down() {
   printf 'removed %s; evidence kept in %s\n' "$T" "$EVIDENCE"
 }
 
+# all: the landing check. Runs bin/journeys, every journey in features/, on the
+# committed tree, and writes EVIDENCE/verified holding HEAD^{tree} only when
+# every check passes. It refuses uncommitted changes, since it stamps the
+# commit. The journeys run under env -i with a fixed PATH and a throwaway HOME,
+# so no login shell, shell rc, or ~/.config decides whether they pass. rex comes
+# from where the Rex app installs it, the path momento-rex's init.lua line names.
+REX_APP_BIN="Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS"
+cmd_all() {
+  local dirty tree ev home rc
+  dirty="$(git -C "$ROOT" status --porcelain)"
+  [ -z "$dirty" ] || die "uncommitted changes; commit them first, since all stamps the committed tree:
+$dirty"
+  tree="$(git -C "$ROOT" rev-parse 'HEAD^{tree}')"
+  [ -x "$HOME/$REX_APP_BIN/rex" ] || die "rex isn't at ~/$REX_APP_BIN; install the Rex app"
+  mkdir -p "$EVIDENCE_ROOT"
+  ev="$(mktemp -d "$EVIDENCE_ROOT/all.XXXX")"
+  home="$(mktemp -d /tmp/momento-rex-verify-home.XXXX)"
+  printf 'tree      %s\nevidence  %s\n' "$tree" "$ev"
+  env -i HOME="$home" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TERM=xterm-256color LANG=en_US.UTF-8 \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin:$HOME/$REX_APP_BIN" BV_EVIDENCE_ROOT="$ev" \
+    /bin/bash "$HERE/journeys" 2>&1 | tee "$ev/journeys.txt"
+  rc=${PIPESTATUS[0]}
+  rm -rf "$home"
+  [ "$rc" = 0 ] || die "a journey failed (exit $rc); no stamp. Output: $ev/journeys.txt"
+  # The stamp names the tree the journeys ran on.
+  [ -z "$(git -C "$ROOT" status --porcelain)" ] && [ "$(git -C "$ROOT" rev-parse 'HEAD^{tree}')" = "$tree" ] \
+    || die "the checkout changed during the run; no stamp"
+  printf '%s\n' "$tree" > "$ev/verified"
+  printf 'verified  %s\n' "$ev/verified"
+}
+
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
+  all) cmd_all ;;
   up) cmd_up ;;
   doctor) load; cmd_doctor ;;
   pane)
@@ -173,5 +206,5 @@ case "$cmd" in
   launches) load; cat "$T/launches" 2>/dev/null ;;
   snap) load; [ $# = 1 ] || die "usage: sandbox snap LABEL"; cmd_snap "$1" ;;
   down) load; cmd_down ;;
-  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
 esac

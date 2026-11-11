@@ -1,0 +1,41 @@
+# bin/worktree.lane: what a lane isolates in momento-rex. bin/worktree (the
+# shared script from the create-worktree-lanes skill) sources this file, so it
+# is POSIX sh.
+#
+# momento-rex has no ports, databases, caches, or build outputs, and make test
+# makes its own temp dir and Rex server per run, so a lane isolates nothing
+# beyond its checkout, and lane_provision, lane_drop, and lane_in_use stay the
+# shared script's no-ops. The lane index only names the registry entry. What a
+# lane must not do is reach the user's real Rex: bin/momento-rex calls
+# bin/worktree guard --deny for that.
+
+# Lanes land through GitHub PRs into main, one commit each. The user
+# squash-merges them, then an agent runs bin/worktree sync.
+# bin/worktree reads these after sourcing the file.
+# shellcheck disable=SC2034
+LANDING='pr' MERGE='no'
+# The user's real Rex starts the watcher from init.lua as
+# ~/src/momento-rex/lib/momento-rex/watch.lua, the primary's source, and a
+# running watcher loaded its code when it started. So after main moves, sync
+# starts a new watcher, which takes over from the old one at its next pass.
+# When Rex isn't running, start says so and exits 0; Rex starts the watcher.
+# shellcheck disable=SC2034
+INSTALL='bin/momento-rex start'
+# The landing check: every verify-momento-rex journey on the committed tree.
+# Its all run writes verified, holding HEAD^{tree}, only when every check passes.
+# shellcheck disable=SC2034
+VERIFY='.claude/skills/verify-momento-rex/bin/sandbox all'
+# shellcheck disable=SC2034
+STAMPS='/tmp/momento-rex-verify-evidence/all.*/verified'
+
+lane_info() {
+  if [ -n "$1" ]; then
+    echo "branch    $(git symbolic-ref --short -q HEAD || echo '(detached)')"
+    echo "isolated  nothing to isolate: momento-rex has no ports or databases, and make test makes its own temp dir and Rex server"
+    echo "refused   bin/momento-rex start, bin/momento-rex install without --no-start, and install or uninstall against the real"
+    echo "          init.lua or ~/.local/state/momento-rex (exit 3). Ask the user to run those in the primary."
+  else
+    echo "lane      none; the primary keeps momento-rex's defaults"
+    echo "real Rex  bin/momento-rex install, uninstall, and start run here"
+  fi
+}

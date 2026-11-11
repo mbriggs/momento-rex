@@ -7,9 +7,11 @@ test: lint unit worktree e2e
 
 # Every tracked file with a sh or bash shebang, including extensionless ones.
 # The names go NUL-separated straight to shellcheck, never through the shell's
-# parser, so a file named `x;cmd;#` stays a file name.
+# parser, so a file named `x;cmd;#` stays a file name. The lane file has no
+# shebang, so it is named here.
 lint:
 	git ls-files -z | xargs -0 grep -l --null -E '^#!/bin/(ba)?sh' | xargs -0 shellcheck
+	shellcheck -s sh bin/worktree.lane
 	$(LUACHECK) -q lib test verify
 
 unit:

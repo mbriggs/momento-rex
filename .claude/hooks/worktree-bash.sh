@@ -4,7 +4,7 @@
 # A failure blocks this one command, then leaves a marker so later commands run
 # and the agent can fix the cause instead of re-running a slow setup each time.
 # JSON goes through the system perl's JSON::PP, which bin/worktree's lock
-# already needs; python3 here comes from mise and may not be on the hook's PATH.
+# already needs; python3 may come from mise and be missing from the hook's PATH.
 
 input=$(cat)
 cwd=$(printf '%s' "$input" | /usr/bin/perl -MJSON::PP -0777 -ne 'my $j = eval { decode_json($_) } || {}; print $j->{cwd} // ""' 2>/dev/null)
@@ -26,7 +26,7 @@ log="$top/tmp/worktree-setup.log"
 if (cd "$top" && bin/worktree setup) >"$log" 2>&1; then
   (cd "$top" && bin/worktree info) | /usr/bin/perl -MJSON::PP -0777 -ne '
 print JSON::PP->new->canonical->encode({hookSpecificOutput => {hookEventName => "PreToolUse", additionalContext =>
-  "Provisioned this git worktree as its own lane. Use these, not the primary checkout:\n"
+  "Provisioned this git worktree as its own lane. Use these, not the primary checkout'"'"'s port or databases:\n"
   . $_
   . "When the work here is done, ask the user whether to remove the worktree."}}), "\n"'
   exit 0

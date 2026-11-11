@@ -32,7 +32,7 @@ Preconditions:
 - **Codex resumed.** One line `codex resumed $IDB cwd=$BV_RUN/it's dir`. The screen shows `cd -- '...it'\''s dir' && codex resume $IDB` or `codex resume $IDB` if the restored shell is already in that folder.
 - **No agent, nothing typed.** `$S fg $SD $BD` is still `zsh`, and its screen shows only a prompt.
 - **Codex before its first message.** Without typing into the resumed codex, run `$S restart` again. `$S launches` shows a second `codex resumed $IDB` after the new marker.
-- **Watcher-only restart.** A lane refuses `momento-rex start` with exit 3, and the primary runs `main`'s code, so this proves a change only once it's on `main`. From the primary, run `$S momento-rex start`, wait 5 seconds, and check `$S launches`. No new lines appear.
+- **Watcher-only restart.** A lane refuses `momento-rex start` with exit 3, and the primary runs `main`'s code, so this proves a change only once it's on `main`. From the primary, run `$S momento-rex start`, wait 5 seconds, and check `$S launches`. No new lines appear. `$S all` drives it in a lane too, by starting the replacement watcher with the `rex do` command that `start` runs.
 
 ## Gotchas
 
